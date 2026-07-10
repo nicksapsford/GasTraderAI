@@ -1,0 +1,673 @@
+"""
+GasTrader AI -- main_gastrader.py
+natural gas (Natural Gas) spread betting main loop. Runs 24/7 Mon-Fri.
+Never holds overnight -- force close at 20:45 UTC, before the 21:00 daily close.
+
+PAPER_TRADING_MODE = True until the demo account is verified.
+"""
+
+import json
+import logging
+import signal
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# ── Config ────────────────────────────────────────────────────────────────────
+
+PAPER_TRADING_MODE = True
+VERSION            = "1.0.0"
+CANDLE_INTERVAL    = 300      # 5-minute candle loop (seconds)
+POSITION_INTERVAL  = 30       # position monitoring (seconds)
+HEARTBEAT_INTERVAL = 240      # liveness log at least this often, even when idle
+DASHBOARD_INTERVAL = 15       # push live top-line state this often, in all periods
+BASE_DIR           = Path(__file__).resolve().parent
+LOG_DIR            = BASE_DIR / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+SHUTDOWN_FLAG      = LOG_DIR / "shutdown.flag"
+DASHBOARD_URL      = "http://localhost:5006/api/update"
+
+# ── Env / logging setup ───────────────────────────────────────────────────────
+
+_ENV_PATH = BASE_DIR / ".env"
+if _ENV_PATH.exists():
+    load_dotenv(dotenv_path=_ENV_PATH)
+else:
+    load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(name)-24s  %(levelname)-8s  %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(LOG_DIR / "gastrader.log", encoding="utf-8"),
+    ],
+)
+log = logging.getLogger("GasTrader.Main")
+
+# ── Internal imports ──────────────────────────────────────────────────────────
+
+import phantom_tracker
+import guinevere_news
+from agent_brain_gas    import get_trading_decision, format_decision_for_display
+from calendar_gas       import check_calendar, is_hard_blocked, get_calendar_context
+from data_feed_gas      import (
+    GasDataFeed, GAS_EPIC, is_market_open, get_liquidity_period,
+    minutes_until_next_open, liquidity_note,
+)
+from capitalcom_connector import CapitalComConnector
+from notifier_gas       import (
+    notify_system_startup, notify_system_shutdown,
+    notify_trade_opened, notify_trade_closed_win, notify_trade_closed_loss,
+    notify_kill_switch_triggered, notify_kill_switch_reset,
+    notify_daily_summary, notify_system_error,
+)
+from paper_trader_gas   import PaperTraderGas
+from performance_gas    import (
+    get_performance_context, get_perf_dashboard_dict, invalidate_cache,
+    generate_milestone_review,
+)
+from pre_checks_gas     import (
+    run_all_pre_checks, run_individual_pre_checks, check_kill_switch_reset,
+)
+from strategy_gas       import should_force_close, get_gbpusd_rate, TRAILING_STOP_POINTS
+
+# ── Graceful shutdown ─────────────────────────────────────────────────────────
+
+_SHUTDOWN = False
+
+
+def _handle_signal(sig, frame):
+    global _SHUTDOWN
+    log.info("Shutdown signal received (%s)", sig)
+    _SHUTDOWN = True
+
+
+signal.signal(signal.SIGINT,  _handle_signal)
+signal.signal(signal.SIGTERM, _handle_signal)
+
+
+# ── Account state ─────────────────────────────────────────────────────────────
+
+class AccountState:
+    """Holds live trading account state passed to pre-checks."""
+
+    def __init__(self, capital: float) -> None:
+        self.capital_gbp        = capital
+        self.daily_pnl_gbp      = 0.0
+        self.consecutive_losses = 0
+        self.last_loss_time     = None
+        self.kill_switch_active = False
+        self.kill_switch_tier   = 0
+        self.kill_switch_until  = None
+        self.kill_switch_reason = ""
+        self.kill_history       = []
+
+    def record_trade(self, pnl_gbp: float) -> None:
+        self.daily_pnl_gbp += pnl_gbp
+        self.capital_gbp = round(self.capital_gbp + pnl_gbp, 2)
+        if pnl_gbp < 0:
+            self.consecutive_losses += 1
+            self.last_loss_time = datetime.now(timezone.utc)
+        else:
+            self.consecutive_losses = 0
+
+    def reset_daily(self) -> None:
+        self.daily_pnl_gbp = 0.0
+
+
+# ── Dashboard push ────────────────────────────────────────────────────────────
+
+_dash_first_ok:   bool  = False
+_dash_fail_count: int   = 0
+_dash_last_warn:  float = 0.0
+
+
+def _dashboard_push_ok(kind, period, price, status, http) -> None:
+    global _dash_first_ok
+    if not _dash_first_ok:
+        _dash_first_ok = True
+        log.info("Dashboard connected -- first %s push OK | period=%s gas=$%.2f status=%s HTTP %s",
+                 kind, period, price, status, http)
+    else:
+        log.debug("Dashboard %s push | period=%s gas=$%.2f status=%s HTTP %s",
+                  kind, period, price, status, http)
+
+
+def _dashboard_push_warn(exc) -> None:
+    global _dash_fail_count, _dash_last_warn
+    _dash_fail_count += 1
+    now = time.monotonic()
+    if now - _dash_last_warn > 60:
+        log.warning("Dashboard push failing (%d so far): %s -- is dashboard_gas.py running on :5006?",
+                    _dash_fail_count, exc)
+        _dash_last_warn = now
+
+
+def _safe_float(v):
+    try:
+        f = float(v)
+        return None if f != f else f
+    except (TypeError, ValueError):
+        return None
+
+
+def _indicator_snapshot(bar) -> dict:
+    if bar is None:
+        return {}
+    return {
+        "ssl_bull":   bool(bar.get("ssl_bull", False)),
+        "rsi":        _safe_float(bar.get("rsi")),
+        "macd":       _safe_float(bar.get("macd")),
+        "tmo_main":   _safe_float(bar.get("tmo_main")),
+        "chande_mo":  _safe_float(bar.get("chande_mo")),
+        "money_flow": _safe_float(bar.get("money_flow")),
+    }
+
+
+def _serialise_trade(t):
+    if t is None:
+        return None
+    return {
+        "direction":        t.direction,
+        "entry_price":      t.entry_price,
+        "exit_price":       t.exit_price,
+        "stop_loss":        t.stop_loss,
+        "take_profit":      t.take_profit,
+        "stake":            t.stake,
+        "size_oz":          t.size_oz,
+        "pnl_usd":          t.pnl_usd,
+        "pnl_gbp":          t.pnl_gbp,
+        "gbpusd_rate":      getattr(t, "gbpusd_exit", None) or getattr(t, "gbpusd_entry", None),
+        "liquidity_period": t.liquidity_period,
+        "entry_time":       t.entry_time.isoformat() if t.entry_time else None,
+    }
+
+
+def _post(payload, kind, period, price, status) -> None:
+    try:
+        import requests
+        resp = requests.post(DASHBOARD_URL, data=json.dumps(payload, default=str),
+                             headers={"Content-Type": "application/json"}, timeout=2)
+        _dashboard_push_ok(kind, period, price, status, resp.status_code)
+    except Exception as exc:
+        _dashboard_push_warn(exc)
+
+
+def _push_dashboard_live(stanley, account, ig, feed, now_utc) -> None:
+    """Lightweight, frequent push of always-known top-line state (all periods)."""
+    period = get_liquidity_period(now_utc)
+    price  = _get_price(ig, feed)
+    gbpusd = get_gbpusd_rate(ig)
+    connector_status = "capitalcom" if (ig is not None and ig.connected) else "yahoo"
+    payload = {
+        "mode":             "PAPER" if PAPER_TRADING_MODE else "LIVE",
+        "version":          VERSION,
+        "liquidity_period": period,
+        "gas_price_usd":   price,
+        "connector_status": connector_status,
+        "capital":          stanley.capital_gbp,
+        "daily_pnl":        account.daily_pnl_gbp,
+        "total_trades":     stanley.total_trades,
+        "win_rate":         stanley.win_rate,
+        "in_trade":         stanley.in_trade,
+        "current_trade":    _serialise_trade(stanley.current_trade),
+        "gbpusd_rate":      gbpusd,
+        "kill_switch":      account.kill_switch_active,
+        "kill_tier":        account.kill_switch_tier,
+        "updated_at":       now_utc.strftime("%Y-%m-%d %H:%M:%S UTC"),
+    }
+    _post(payload, "live", period, price, connector_status)
+
+
+def _push_dashboard(stanley, account, ig, price, gbpusd, period, *,
+                    decision=None, pre_checks=None, calendar_summary="",
+                    connector_status="yahoo", panel_mode="pre_checks",
+                    trend_1d="NEUTRAL", trend_1h="NEUTRAL", signal_5m="NEUTRAL",
+                    indicators_1d=None, indicators_1h=None, indicators_5m=None) -> None:
+    """Full push with decision / pre-checks / indicators (on candle ticks)."""
+    perf = get_perf_dashboard_dict()
+    payload = {
+        "mode":             "PAPER" if PAPER_TRADING_MODE else "LIVE",
+        "version":          VERSION,
+        "liquidity_period": period,
+        "gas_price_usd":   price,
+        "connector_status": connector_status,
+        "capital":          stanley.capital_gbp,
+        "daily_pnl":        account.daily_pnl_gbp,
+        "total_trades":     stanley.total_trades,
+        "win_rate":         stanley.win_rate,
+        "in_trade":         stanley.in_trade,
+        "current_trade":    _serialise_trade(stanley.current_trade),
+        "decision":         decision,
+        "panel_mode":       panel_mode,
+        "checklist":        (decision or {}).get("checklist", {}),
+        "pre_checks":       pre_checks,
+        "trend_1d":         trend_1d,
+        "trend_1h":         trend_1h,
+        "signal_5m":        signal_5m,
+        "indicators_1d":    indicators_1d or {},
+        "indicators_1h":    indicators_1h or {},
+        "indicators_5m":    indicators_5m or {},
+        "perf":             perf,
+        "calendar":         calendar_summary,
+        "gbpusd_rate":      gbpusd,
+        "kill_switch":      account.kill_switch_active,
+        "kill_tier":        account.kill_switch_tier,
+        "updated_at":       datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+    }
+    _post(payload, "full", period, price, connector_status)
+
+
+# ── Price / rate getters ──────────────────────────────────────────────────────
+
+def _get_price(ig, feed) -> float:
+    """Current Gas price in USD -- Capital.com first, yfinance fallback."""
+    try:
+        if ig is not None and ig.connected:
+            pd_ = ig.get_price(GAS_EPIC)
+            if pd_:
+                b, a = pd_.get("bid"), pd_.get("ask")
+                if b and a:
+                    return round((float(b) + float(a)) / 2, 2)
+                return float(pd_.get("mid", 0.0))
+    except Exception:
+        pass
+    try:
+        df = feed.get("5m")
+        if df is not None and not df.empty:
+            return round(float(df["close"].iloc[-1]), 2)
+    except Exception:
+        pass
+    return 0.0
+
+
+# ── Core candle tick ──────────────────────────────────────────────────────────
+
+def run_candle_tick(feed, stanley, account, ig) -> None:
+    now_utc = datetime.now(timezone.utc)
+    period  = get_liquidity_period(now_utc)
+    price   = _get_price(ig, feed)
+    gbpusd  = get_gbpusd_rate(ig)
+    connector_status = "capitalcom" if (ig is not None and ig.connected) else "yahoo"
+
+    log.info("--- CANDLE TICK | %s | period=%s | GAS=$%.2f | GBPUSD=%.4f ---",
+             now_utc.strftime("%H:%M:%S UTC"), period, price, gbpusd)
+
+    # Calendar hard block (Guinevere)
+    hard_blocked, block_reason, event_name, mins_remain = is_hard_blocked(now_utc)
+    cal_context = get_calendar_context(now_utc)
+    cal_summary = check_calendar(now_utc).get("calendar_summary", "")
+
+    if hard_blocked:
+        log.warning("CALENDAR HARD BLOCK: %s (%d min)", block_reason, mins_remain)
+        if not stanley.in_trade:
+            _push_dashboard(stanley, account, ig, price, gbpusd, period,
+                            calendar_summary=cal_summary, connector_status=connector_status)
+            return
+
+    # Refresh data
+    try:
+        feed.refresh()
+    except Exception as exc:
+        log.error("Data refresh failed: %s", exc)
+        return
+
+    try:
+        bar_1d = feed.latest_bar("1d")
+    except Exception:
+        bar_1d = None
+    try:
+        bar_1h = feed.latest_bar("1h")
+        bar_5m = feed.latest_bar("5m")
+    except Exception:
+        log.warning("Insufficient indicator data -- skipping tick")
+        return
+
+    perf_context = get_performance_context()
+
+    sig_1h = feed.composite_signal("1h")
+    sig_5m = feed.composite_signal("5m")
+    trend_1d = "LONG" if (bar_1d is not None and bar_1d.get("ssl_bull")) else "SHORT"
+    proposed_direction = sig_1h if sig_1h in ("LONG", "SHORT") else "BOTH"
+
+    ind_1d = _indicator_snapshot(bar_1d)
+    ind_1h = _indicator_snapshot(bar_1h)
+    ind_5m = _indicator_snapshot(bar_5m)
+
+    checks = run_all_pre_checks(
+        bar_1h=bar_1h, bar_5m=bar_5m, account=account,
+        current_trade=stanley.current_trade, bar_1d=bar_1d,
+        proposed_direction=proposed_direction, now_utc=now_utc,
+    )
+    individual_checks = run_individual_pre_checks(
+        bar_1h=bar_1h, bar_5m=bar_5m, account=account,
+        current_trade=stanley.current_trade, bar_1d=bar_1d,
+        proposed_direction=proposed_direction, now_utc=now_utc,
+    )
+
+    if not checks["passed"]:
+        log.info("Pre-checks FAILED: %s", checks.get("reason"))
+        _push_dashboard(stanley, account, ig, price, gbpusd, period,
+                        pre_checks=individual_checks, calendar_summary=cal_summary,
+                        connector_status=connector_status, panel_mode="pre_checks",
+                        trend_1d=trend_1d, trend_1h=sig_1h, signal_5m=sig_5m,
+                        indicators_1d=ind_1d, indicators_1h=ind_1h, indicators_5m=ind_5m)
+        if checks.get("kill_switch_triggered"):
+            account.kill_switch_active = True
+            tier = checks.get("kill_tier", 1)
+            account.kill_switch_tier = tier
+            wait_hours = {1: 6, 2: 12}.get(tier, 24)
+            notify_kill_switch_triggered(tier=tier, reason=checks.get("reason", ""),
+                                         wait_hours=wait_hours, daily_pnl=account.daily_pnl_gbp,
+                                         capital=stanley.capital_gbp)
+        return
+
+    # Call Arthur
+    decision = get_trading_decision(
+        bar_1h=bar_1h, bar_5m=bar_5m, current_price=price, liquidity_period=period,
+        bar_1d=bar_1d, current_trade=stanley.current_trade,
+        calendar_context=cal_context, perf_context=perf_context, gbpusd_rate=gbpusd,
+    )
+
+    # Guinevere news -> Arthur confidence adjustment (soft, additive; never blocks).
+    _action = decision.get("decision", "STAY_OUT")
+    if _action in ("ENTER_LONG", "ENTER_SHORT"):
+        _dir = "LONG" if _action == "ENTER_LONG" else "SHORT"
+        try:
+            _news_adj, _news_reason = guinevere_news.get_confidence_adjustment(_dir)
+            _base = float(decision.get("confidence") or 0)
+            decision["confidence"] = max(0, min(100, _base + _news_adj))
+            decision["news_adjustment"] = _news_adj
+            log.info(_news_reason)
+        except Exception as _e:
+            log.warning("Guinevere news adjustment failed: %s", _e)
+
+    log.info(format_decision_for_display(decision))
+    _push_dashboard(stanley, account, ig, price, gbpusd, period,
+                    decision=decision, pre_checks=individual_checks, calendar_summary=cal_summary,
+                    connector_status=connector_status, panel_mode="claude",
+                    trend_1d=trend_1d, trend_1h=sig_1h, signal_5m=sig_5m,
+                    indicators_1d=ind_1d, indicators_1h=ind_1h, indicators_5m=ind_5m)
+
+    action = decision.get("decision", "STAY_OUT")
+    if action == "ENTER_LONG" and not stanley.in_trade:
+        _open_trade(stanley, account, ig, "LONG", price, period, gbpusd)
+    elif action == "ENTER_SHORT" and not stanley.in_trade:
+        _open_trade(stanley, account, ig, "SHORT", price, period, gbpusd)
+    elif action == "EXIT" and stanley.in_trade:
+        _close_trade(stanley, account, ig, price, gbpusd, "ARTHUR_EXIT")
+    elif action == "HOLD" and stanley.in_trade:
+        log.info("Arthur says HOLD -- maintaining position")
+    elif action == "STAY_OUT":
+        log.info("Arthur says STAY_OUT -- no action")
+        try:
+            _dir = proposed_direction if proposed_direction in ("LONG", "SHORT") else ("LONG" if (bar_1d and bar_1d.get("ssl_bull")) else "SHORT")
+            phantom_tracker.record_decision(
+                market="GAS",
+                direction_blocked=_dir,
+                price_at_decision=price,
+                confidence=decision.get("confidence"),
+                reason_for_stay_out="ARTHUR_STAY_OUT",
+                get_price_fn=lambda m: _get_price(ig, feed),
+            )
+        except Exception as _exc:
+            log.warning("phantom_tracker record failed: %s", _exc)
+
+    if stanley.total_trades > 0 and stanley.total_trades % 50 == 0:
+        generate_milestone_review(LOG_DIR / "gas_trades.csv", stanley.total_trades // 50)
+
+
+# ── Position monitoring ───────────────────────────────────────────────────────
+
+def monitor_open_position(stanley, account, ig, feed) -> None:
+    if not stanley.in_trade:
+        return
+    now_utc = datetime.now(timezone.utc)
+    price   = _get_price(ig, feed)
+    gbpusd  = get_gbpusd_rate(ig)
+
+    if should_force_close(now_utc):
+        log.warning("Force close window (20:45 UTC) -- closing all positions")
+        _close_trade(stanley, account, ig, price, gbpusd, "FORCE_CLOSE_2045")
+        return
+
+    reason = stanley.monitor_trade(price, gbpusd)
+    if reason:
+        trade = stanley.trade_history[-1] if stanley.trade_history else None
+        _handle_closed_trade(account, trade)
+        log.info("Position auto-closed: %s | price=$%.2f", reason, price)
+        invalidate_cache()
+
+
+# ── Open / close helpers ──────────────────────────────────────────────────────
+
+def _open_trade(stanley, account, ig, direction, price, period, gbpusd) -> None:
+    trade = stanley.open_trade(direction, price, gbpusd, period)
+    if PAPER_TRADING_MODE:
+        log.info("[PAPER] OPEN %s | entry=$%.2f | size=%.2foz | stop=$%.2f | target=$%.2f",
+                 direction, price, trade.size_oz, trade.stop_loss, trade.take_profit)
+    else:
+        try:
+            ig.open_position(epic=GAS_EPIC, direction="BUY" if direction == "LONG" else "SELL",
+                             size=trade.size_oz, stop_distance=trade.stop_pts)
+            log.info("[LIVE] OPEN %s via Capital.com | entry=$%.2f", direction, price)
+        except Exception as exc:
+            log.error("Capital.com open_position failed: %s -- tracked paper only", exc)
+            notify_system_error(f"Capital.com open failed: {exc}")
+    notify_trade_opened(direction=direction, entry_price=price, stop_loss=trade.stop_loss,
+                        take_profit=trade.take_profit, stake=trade.stake,
+                        liquidity_period=period, size_oz=trade.size_oz)
+    log.info("Trade opened: %s", trade.summary())
+
+
+def _close_trade(stanley, account, ig, price, gbpusd, reason) -> None:
+    trade = stanley.close_trade(price, reason, gbpusd)
+    if trade is None:
+        return
+    _handle_closed_trade(account, trade)
+    invalidate_cache()
+    if not PAPER_TRADING_MODE:
+        try:
+            positions = ig.get_open_positions()
+            for pos in positions:
+                ig.close_position(deal_id=pos.get("dealId"),
+                                  direction="SELL" if trade.direction == "LONG" else "BUY",
+                                  size=trade.size_oz)
+            log.info("[LIVE] Position closed via Capital.com | reason=%s", reason)
+        except Exception as exc:
+            log.error("Capital.com close_position failed: %s", exc)
+            notify_system_error(f"Capital.com close failed: {exc}")
+    if trade.pnl_gbp >= 0:
+        notify_trade_closed_win(direction=trade.direction, exit_price=price,
+                                points_gained=trade.points_gained, pnl_gbp=trade.pnl_gbp,
+                                capital=account.capital_gbp, reason=reason)
+    else:
+        notify_trade_closed_loss(direction=trade.direction, exit_price=price,
+                                 points_gained=trade.points_gained, pnl_gbp=trade.pnl_gbp,
+                                 capital=account.capital_gbp, reason=reason)
+
+
+def _handle_closed_trade(account, trade) -> None:
+    if trade is None:
+        return
+    account.record_trade(trade.pnl_gbp)
+    log.info("Trade result: %s%+.2f GBP | capital=£%.2f",
+             "+" if trade.pnl_gbp >= 0 else "", trade.pnl_gbp, account.capital_gbp)
+
+
+# ── Daily summary ─────────────────────────────────────────────────────────────
+
+_last_summary_date: str = ""
+
+
+def _maybe_send_daily_summary(stanley, account) -> None:
+    global _last_summary_date
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if today == _last_summary_date:
+        return
+    notify_daily_summary(date_str=today, trades=stanley.total_trades,
+                         pnl_gbp=account.daily_pnl_gbp, capital=stanley.capital_gbp,
+                         win_rate=stanley.win_rate)
+    account.reset_daily()
+    _last_summary_date = today
+    log.info("Daily summary sent for %s", today)
+
+
+# ── Main loop ─────────────────────────────────────────────────────────────────
+
+def _interruptible_sleep(seconds: float) -> None:
+    end = time.monotonic() + seconds
+    while not _SHUTDOWN and time.monotonic() < end:
+        time.sleep(min(1, end - time.monotonic()))
+
+
+def main() -> None:
+    log.info("=" * 70)
+    log.info("  GasTrader AI v%s", VERSION)
+    log.info("  Natural Gas (Natural Gas) Spread Betting -- Capital.com")
+    log.info("  Mode: %s", "PAPER TRADING" if PAPER_TRADING_MODE else "LIVE TRADING")
+    log.info("=" * 70)
+
+    ig = CapitalComConnector()
+    try:
+        ig.connect()
+        ig_connected = True
+        log.info("Capital.com connected")
+    except Exception as exc:
+        log.error("Capital.com connection failed: %s -- yfinance fallback", exc)
+        ig_connected = False
+
+    feed = GasDataFeed(ig_connector=ig if ig_connected else None)
+    try:
+        feed.initialise()
+    except Exception as exc:
+        log.warning("Initial data load partial: %s -- will retry", exc)
+
+    stanley = PaperTraderGas()
+    account = AccountState(capital=stanley.capital_gbp)
+    stanley.print_status()
+
+    notify_system_startup(capital=stanley.capital_gbp,
+                          mode="PAPER" if PAPER_TRADING_MODE else "LIVE")
+
+    # Clear any stale shutdown flag from a previous session (watchdog owns it during a run).
+    SHUTDOWN_FLAG.unlink(missing_ok=True)
+
+    log.info("GasTrader AI is running. Ctrl+C to stop.")
+    log.info("Dashboard: http://localhost:5006  (start dashboard_gas.py separately)")
+
+    last_candle_tick    = 0.0
+    last_position_check = 0.0
+    last_heartbeat      = 0.0
+    last_dashboard_push = 0.0
+    _force_close_done   = False
+
+    # Resolve stale phantom PENDING rows on startup, then run a 15-min watchdog
+    try:
+        phantom_tracker.resolve_stale_pending(get_historical_price_fn=feed.get_historical_price)
+        phantom_tracker.start_watchdog(get_historical_price_fn=feed.get_historical_price, interval_minutes=15)
+    except Exception as _exc:
+        log.warning("phantom resolve/watchdog startup failed: %s", _exc)
+
+    import random
+    # Stagger Capital.com API calls across systems (shared demo Z6CJSM) to avoid 429s
+    STARTUP_DELAY_SECONDS = 60
+    _delay = STARTUP_DELAY_SECONDS + random.uniform(0, 10)  # jitter avoids re-sync
+    log.info("Staggering Capital.com requests -- waiting %.0fs before main loop", _delay)
+    time.sleep(_delay)
+
+    while not _SHUTDOWN:
+        try:
+            now     = time.monotonic()
+            now_utc = datetime.now(timezone.utc)
+
+            # Shutdown flag -- exit cleanly, leave flag for the watchdog to consume.
+            if SHUTDOWN_FLAG.exists():
+                log.info("Shutdown requested via dashboard -- stopping (flag left for watchdog)")
+                break
+
+            # Live dashboard push (all periods, every ~15s)
+            if (now - last_dashboard_push) >= DASHBOARD_INTERVAL:
+                _push_dashboard_live(stanley, account, ig, feed, now_utc)
+                last_dashboard_push = now
+
+            # Liveness heartbeat
+            if (now - last_heartbeat) >= HEARTBEAT_INTERVAL:
+                log.info("Heartbeat -- alive | %s | period=%s | in_trade=%s",
+                         now_utc.strftime("%H:%M UTC"), get_liquidity_period(now_utc),
+                         stanley.in_trade)
+                last_heartbeat = now
+
+            # Kill-switch auto-reset
+            if check_kill_switch_reset(account):
+                notify_kill_switch_reset(tier=account.kill_switch_tier, wait_hours=0,
+                                         capital=stanley.capital_gbp)
+                account.kill_switch_tier = 0
+
+            # Market closed (21:00-22:00 daily break or weekend)
+            if not is_market_open(now_utc):
+                if stanley.in_trade:
+                    price  = _get_price(ig, feed)
+                    gbpusd = get_gbpusd_rate(ig)
+                    log.warning("Market closed with open position -- closing now")
+                    _close_trade(stanley, account, ig, price, gbpusd, "MARKET_CLOSED")
+                _maybe_send_daily_summary(stanley, account)
+                mins = minutes_until_next_open(now_utc)
+                sleep_sec = max(60, min(mins * 60, HEARTBEAT_INTERVAL)) if mins else HEARTBEAT_INTERVAL
+                log.info("Gas market closed -- next open in %s min", mins if mins else "?")
+                _interruptible_sleep(sleep_sec)
+                _force_close_done = False
+                continue
+
+            # Force close at 20:45 UTC (never hold overnight)
+            if should_force_close(now_utc):
+                if stanley.in_trade and not _force_close_done:
+                    price  = _get_price(ig, feed)
+                    gbpusd = get_gbpusd_rate(ig)
+                    log.warning("20:45 UTC force close triggered")
+                    _close_trade(stanley, account, ig, price, gbpusd, "FORCE_CLOSE_2045")
+                    _force_close_done = True
+                _interruptible_sleep(30)
+                continue
+
+            # Position monitoring every 30s
+            if stanley.in_trade and (now - last_position_check) >= POSITION_INTERVAL:
+                monitor_open_position(stanley, account, ig, feed)
+                last_position_check = now
+
+            # Candle tick every 5 minutes
+            if (now - last_candle_tick) >= CANDLE_INTERVAL:
+                run_candle_tick(feed, stanley, account, ig)
+                last_candle_tick = now
+
+            _interruptible_sleep(5)
+
+        except KeyboardInterrupt:
+            break
+        except Exception as exc:
+            log.error("Main loop error: %s", exc, exc_info=True)
+            notify_system_error(str(exc)[:200])
+            time.sleep(30)
+
+    # Shutdown
+    log.info("")
+    log.info("=" * 70)
+    log.info("  GasTrader AI -- Shutdown")
+    log.info("=" * 70)
+    if stanley.in_trade:
+        log.warning("Position still open at shutdown -- closing paper record")
+        price  = _get_price(ig, feed)
+        gbpusd = get_gbpusd_rate(ig)
+        _close_trade(stanley, account, ig, price, gbpusd, "SHUTDOWN")
+    stanley.print_status()
+    notify_system_shutdown(stanley.capital_gbp)
+    log.info("GasTrader AI stopped cleanly.")
+
+
+if __name__ == "__main__":
+    main()
