@@ -1,3 +1,14 @@
+## [1.1.1] - 2026-07-11
+### Added
+- Morgan confidence persistence: CSV audit trail in logs/morgan_confidence.csv
+  (save_confidence/load_confidence; set_confidence now appends a row after the
+  JSON persist).
+- Guinevere sentiment persistence: CSV audit trail in logs/guinevere_sentiment.csv
+  (save_sentiment; fetch_gas_sentiment records sentiment/score/top-3 headlines and
+  the EIA window flag each fetch).
+- Morgan confidence restored on restart: startup hook in main_gastrader.py reads
+  the last CSV row and re-applies it (else logs baseline 50).
+
 ## [1.1.0] - 2026-07-11
 ### Added
 - Morgan individual phantom feedback: persistent confidence store in

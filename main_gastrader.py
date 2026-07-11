@@ -70,6 +70,7 @@ from paper_trader_gas   import PaperTraderGas
 from performance_gas    import (
     get_performance_context, get_perf_dashboard_dict, invalidate_cache,
     generate_milestone_review, process_new_phantom_verdicts,
+    load_confidence, set_confidence,
 )
 from pre_checks_gas     import (
     run_all_pre_checks, run_individual_pre_checks, check_kill_switch_reset,
@@ -579,6 +580,17 @@ def main() -> None:
         process_new_phantom_verdicts()
     except Exception as _exc:
         log.warning("Morgan phantom verdict poller startup failed: %s", _exc)
+
+    # Morgan: restore last persisted confidence from the CSV audit trail.
+    try:
+        _saved_conf = load_confidence()
+        if _saved_conf is not None:
+            set_confidence(_saved_conf, reason='restore')
+            log.info("Morgan: confidence restored from CSV -> %.1f", _saved_conf)
+        else:
+            log.info("Morgan: no persisted confidence found -- starting at baseline 50")
+    except Exception as _exc:
+        log.warning("Morgan confidence restore failed: %s", _exc)
 
     import random
     # Stagger Capital.com API calls across systems (shared demo Z6CJSM) to avoid 429s

@@ -4,6 +4,7 @@ Performance tracker and confidence engine for Arthur.
 Tracks win rate by direction and by liquidity period (Asian/London/NY/Overlap).
 """
 
+import csv
 import json
 import logging
 import os
@@ -24,6 +25,51 @@ _MORGAN_STATE_PATH = os.path.join(os.path.dirname(__file__), 'logs', 'morgan_con
 _morgan_lock = threading.Lock()
 _morgan_confidence = None
 
+# ── Morgan confidence CSV audit trail ─────────────────────────────────────────
+CONFIDENCE_LOG = os.path.join(os.path.dirname(__file__), 'logs', 'morgan_confidence.csv')
+CONFIDENCE_FIELDNAMES = ['timestamp', 'confidence', 'level', 'reason']
+
+
+def save_confidence(confidence, reason='tick'):
+    """Append a confidence sample to CONFIDENCE_LOG (CSV audit trail)."""
+    try:
+        conf = float(confidence)
+        if conf >= 65:
+            level = 'HIGH'
+        elif conf <= 35:
+            level = 'LOW'
+        else:
+            level = 'MEDIUM'
+        os.makedirs(os.path.dirname(CONFIDENCE_LOG), exist_ok=True)
+        new_file = not os.path.exists(CONFIDENCE_LOG)
+        with open(CONFIDENCE_LOG, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=CONFIDENCE_FIELDNAMES)
+            if new_file:
+                writer.writeheader()
+            writer.writerow({
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'confidence': conf,
+                'level': level,
+                'reason': reason,
+            })
+    except Exception as e:
+        log.warning("Morgan: could not append confidence CSV: %s", e)
+
+
+def load_confidence():
+    """Return the confidence float from the last row of CONFIDENCE_LOG, else None."""
+    try:
+        if not os.path.exists(CONFIDENCE_LOG):
+            return None
+        with open(CONFIDENCE_LOG, newline='', encoding='utf-8') as f:
+            rows = list(csv.DictReader(f))
+        if not rows:
+            return None
+        return float(rows[-1]['confidence'])
+    except Exception as e:
+        log.warning("Morgan: could not load confidence CSV: %s", e)
+        return None
+
 
 def _load_morgan_confidence():
     global _morgan_confidence
@@ -41,7 +87,7 @@ def get_confidence():
         return _load_morgan_confidence()
 
 
-def set_confidence(value):
+def set_confidence(value, reason='update'):
     global _morgan_confidence
     with _morgan_lock:
         _morgan_confidence = max(0.0, min(100.0, float(value)))
@@ -51,6 +97,7 @@ def set_confidence(value):
                 json.dump({'confidence': _morgan_confidence}, f)
         except Exception as e:
             log.warning("Morgan: could not persist confidence: %s", e)
+        save_confidence(_morgan_confidence, reason)
         log.info("Morgan: confidence set to %.1f", _morgan_confidence)
         return _morgan_confidence
 

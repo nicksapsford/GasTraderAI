@@ -8,6 +8,7 @@ All times UTC.
 """
 
 import os
+import csv
 import json
 import logging
 import requests
@@ -16,6 +17,44 @@ from dotenv import load_dotenv
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+
+# ── Guinevere sentiment CSV audit trail ────────────────────
+SENTIMENT_LOG = os.path.join(os.path.dirname(__file__), 'logs', 'guinevere_sentiment.csv')
+SENTIMENT_FIELDNAMES = [
+    'timestamp', 'sentiment', 'score',
+    'headline_1', 'headline_2', 'headline_3', 'eia_window'
+]
+
+
+def save_sentiment(sentiment_data):
+    """Append one sentiment snapshot row to SENTIMENT_LOG (CSV audit trail)."""
+    try:
+        headlines = sentiment_data.get('headlines', []) or []
+        titles = []
+        for h in headlines[:3]:
+            if isinstance(h, dict):
+                titles.append(h.get('title', ''))
+            else:
+                titles.append(str(h))
+        while len(titles) < 3:
+            titles.append('')
+        os.makedirs(os.path.dirname(SENTIMENT_LOG), exist_ok=True)
+        new_file = not os.path.exists(SENTIMENT_LOG)
+        with open(SENTIMENT_LOG, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=SENTIMENT_FIELDNAMES)
+            if new_file:
+                writer.writeheader()
+            writer.writerow({
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'sentiment': sentiment_data.get('sentiment', ''),
+                'score': sentiment_data.get('score', ''),
+                'headline_1': titles[0],
+                'headline_2': titles[1],
+                'headline_3': titles[2],
+                'eia_window': bool(sentiment_data.get('eia_window', False)),
+            })
+    except Exception as e:
+        logger.warning(f"guinevere_news: could not append sentiment CSV: {e}")
 
 # ── API Configuration ──────────────────────────────────────
 CURRENTS_API_KEY = os.getenv('CURRENTS_API_KEY')
@@ -176,6 +215,11 @@ def fetch_gas_sentiment():
         }
         _news_cache = result
         logger.info(f"guinevere_news: {reason}")
+        result['eia_window'] = get_eia_gas_calendar_status()[0]
+        try:
+            save_sentiment(result)
+        except Exception:
+            pass
         return result
 
     except requests.exceptions.Timeout:
