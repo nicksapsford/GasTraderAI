@@ -342,7 +342,8 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
 .pos-long {border-left:3px solid var(--green);}
 .pos-short{border-left:3px solid var(--red);}
 .pos-none {border-left:3px solid var(--border);color:var(--muted);text-align:center;padding:9px;}
-.pos-row{display:flex;justify-content:space-between;padding:2px 5px;}
+.pos-row{display:flex;gap:8px;padding:2px 5px;}
+.pos-row>span:first-child{width:120px;flex-shrink:0;}
 
 /* CHECK ITEMS */
 .check-item{display:flex;align-items:center;gap:6px;padding:2px 0;border-bottom:1px solid var(--bg3);font-size:11px;}
@@ -1122,6 +1123,84 @@ def index():
     return Response(page, mimetype="text/html")
 
 
+def _compute_flat_fields(s: dict) -> dict:
+    """Derive flat Lancelot / Arthur / locked-P&L fields for the dashboard and
+    the RoundTable overview. Fully defensive: any error yields safe defaults so
+    /api/state never 500s."""
+    out = {
+        "lancelot_status":       "BLOCKED",
+        "lancelot_fails":        0,
+        "lancelot_fail_reasons": [],
+        "arthur_decision":       "---",
+        "arthur_confidence":     None,
+        "arthur_consulted":      False,
+        "locked_pnl":            None,
+    }
+    try:
+        panel_mode = s.get("panel_mode", "pre_checks")
+        decision   = s.get("decision") or {}
+        pre_checks = s.get("pre_checks") or {}
+        trade      = s.get("current_trade")
+
+        # Arthur is only consulted once Lancelot's pre-checks pass (panel flips
+        # to "claude"); a hard calendar block or a pre-check failure keeps it on
+        # "pre_checks".
+        consulted = (panel_mode == "claude")
+        out["arthur_consulted"] = consulted
+
+        # --- Lancelot pre-checks ------------------------------------------
+        fail_reasons = [name for name, val in pre_checks.items() if val is False]
+        n_fails = len(fail_reasons)
+        out["lancelot_fails"]        = n_fails
+        out["lancelot_fail_reasons"] = fail_reasons
+        if consulted:
+            out["lancelot_status"] = "CLEAR"
+        elif n_fails > 0:
+            out["lancelot_status"] = f"{n_fails} FAILS"
+        else:
+            out["lancelot_status"] = "BLOCKED"
+
+        # --- Arthur decision ----------------------------------------------
+        if not consulted:
+            out["arthur_decision"] = "---"
+        elif trade:
+            out["arthur_decision"] = "HOLD"
+        else:
+            raw = str(decision.get("decision", "")).upper()
+            if raw.startswith("EXIT"):
+                out["arthur_decision"] = "STAY OUT"
+            else:
+                out["arthur_decision"] = {
+                    "ENTER_LONG":  "LONG",
+                    "ENTER_SHORT": "SHORT",
+                    "STAY_OUT":    "STAY OUT",
+                    "HOLD":        "HOLD",
+                }.get(raw, "---")
+
+        # --- Arthur confidence --------------------------------------------
+        if consulted and decision.get("confidence") is not None:
+            try:
+                out["arthur_confidence"] = int(float(decision.get("confidence")))
+            except (TypeError, ValueError):
+                out["arthur_confidence"] = None
+
+        # --- Locked-in P&L (guaranteed if stop is hit) --------------------
+        # Gas stake is £/pt, so (points * stake) is already GBP -- matches the
+        # closed-trade pnl_gbp convention; do NOT multiply by gbpusd.
+        if trade:
+            direction = str(trade.get("direction", "")).upper()
+            entry     = float(trade.get("entry_price") or 0.0)
+            stop      = float(trade.get("stop_loss") or 0.0)
+            stake     = float(trade.get("stake") or 0.0)
+            if direction == "LONG":
+                out["locked_pnl"] = round((stop - entry) * stake, 2)
+            elif direction == "SHORT":
+                out["locked_pnl"] = round((entry - stop) * stake, 2)
+    except Exception:
+        pass
+    return out
+
+
 @app.route("/api/state")
 def api_state():
     s = get_state()
@@ -1134,7 +1213,7 @@ def api_state():
     monthly = load_monthly_stats()
     perf    = s.get("perf") or {}
 
-    return jsonify({
+    resp = {
         "mode":             s.get("mode", "PAPER"),
         "version":          s.get("version", APP_VERSION),
         "liquidity_period": s.get("liquidity_period", "CLOSED"),
@@ -1167,7 +1246,9 @@ def api_state():
         "monthly_stats":    monthly,
         "stay_out_quality": get_stay_out_quality(),
         "version_string":   VERSION_STRING,
-    })
+    }
+    resp.update(_compute_flat_fields(s))
+    return jsonify(resp)
 
 
 @app.route("/api/update", methods=["POST"])
