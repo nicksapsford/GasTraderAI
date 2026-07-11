@@ -1,3 +1,8 @@
+## [1.1.2] - 2026-07-11
+### Added
+- Silent launcher (pythonw -- no console windows); output to logs/console.log with daily rotation (7 days kept)
+- Launcher now starts the dashboard + watchdog silently (was cmd windows)
+
 ## [1.1.1] - 2026-07-11
 ### Added
 - Morgan confidence persistence: CSV audit trail in logs/morgan_confidence.csv
