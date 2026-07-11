@@ -4,7 +4,11 @@ Performance tracker and confidence engine for Arthur.
 Tracks win rate by direction and by liquidity period (Asian/London/NY/Overlap).
 """
 
+import json
 import logging
+import os
+import time
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -13,6 +17,113 @@ import pandas as pd
 import phantom_tracker
 
 log = logging.getLogger("GasTrader.Morgan")
+
+
+# ── Morgan individual phantom feedback: persistent confidence store ───────────
+_MORGAN_STATE_PATH = os.path.join(os.path.dirname(__file__), 'logs', 'morgan_confidence.json')
+_morgan_lock = threading.Lock()
+_morgan_confidence = None
+
+
+def _load_morgan_confidence():
+    global _morgan_confidence
+    if _morgan_confidence is None:
+        try:
+            with open(_MORGAN_STATE_PATH) as f:
+                _morgan_confidence = float(json.load(f).get('confidence', 50.0))
+        except Exception:
+            _morgan_confidence = 50.0
+    return _morgan_confidence
+
+
+def get_confidence():
+    with _morgan_lock:
+        return _load_morgan_confidence()
+
+
+def set_confidence(value):
+    global _morgan_confidence
+    with _morgan_lock:
+        _morgan_confidence = max(0.0, min(100.0, float(value)))
+        try:
+            os.makedirs(os.path.dirname(_MORGAN_STATE_PATH), exist_ok=True)
+            with open(_MORGAN_STATE_PATH, 'w') as f:
+                json.dump({'confidence': _morgan_confidence}, f)
+        except Exception as e:
+            log.warning("Morgan: could not persist confidence: %s", e)
+        log.info("Morgan: confidence set to %.1f", _morgan_confidence)
+        return _morgan_confidence
+
+
+def apply_phantom_verdict_feedback(verdict, pnl_1hr, current_confidence):
+    """Compute Morgan's individual-verdict confidence adjustment.
+
+    NEUTRAL verdicts carry no signal (adjustment 0.0). For CORRECT/WRONG the raw
+    magnitude scales with how big the missed/avoided move was:
+        raw = clamp(abs(pnl_1hr) / 50, 0.5, 2.0)
+    CORRECT (we were right to stay out) nudges confidence UP by raw;
+    WRONG (we missed a profit) nudges it DOWN by raw.
+    Returns (adjustment, reason).
+    """
+    if verdict == 'NEUTRAL':
+        return 0.0, "NEUTRAL verdict -- no confidence signal"
+    try:
+        pnl = abs(float(pnl_1hr))
+    except (TypeError, ValueError):
+        pnl = 0.0
+    raw = max(0.5, min(2.0, pnl / 50.0))
+    if verdict == 'CORRECT':
+        adjustment = raw
+        reason = "CORRECT stay-out (avoided %.1f move) -> confidence +%.2f" % (pnl, raw)
+    elif verdict == 'WRONG':
+        adjustment = -raw
+        reason = "WRONG stay-out (missed %.1f move) -> confidence -%.2f" % (pnl, raw)
+    else:
+        return 0.0, "Unknown verdict '%s' -- no confidence signal" % verdict
+    log.info("Morgan phantom feedback: %s (conf %.1f -> %.1f)",
+             reason, current_confidence, max(0.0, min(100.0, current_confidence + adjustment)))
+    return adjustment, reason
+
+
+def process_new_phantom_verdicts(get_confidence_fn=None, set_confidence_fn=None):
+    """Start a daemon poller that applies Morgan's individual phantom feedback.
+
+    Every 300s it pulls unprocessed CORRECT/WRONG phantom verdicts, applies the
+    per-verdict confidence adjustment, persists the new confidence, and marks
+    those rows processed so they are never double-counted.
+    """
+    get_fn = get_confidence_fn or get_confidence
+    set_fn = set_confidence_fn or set_confidence
+
+    def _loop():
+        while True:
+            try:
+                rows = phantom_tracker.get_unprocessed_verdicts()
+                if rows:
+                    processed = []
+                    for r in rows:
+                        try:
+                            conf = get_fn()
+                            adjustment, reason = apply_phantom_verdict_feedback(
+                                r.get('verdict'), r.get('pnl_1hr'), conf)
+                            new_conf = max(0.0, min(100.0, conf + adjustment))
+                            set_fn(new_conf)
+                            ts = r.get('timestamp')
+                            if ts:
+                                processed.append(ts)
+                        except Exception as e:
+                            log.warning("Morgan: phantom row feedback failed: %s", e)
+                    if processed:
+                        phantom_tracker.mark_processed(processed)
+                        log.info("Morgan: processed %d phantom verdict(s)", len(processed))
+            except Exception as e:
+                log.warning("Morgan: phantom poller loop error: %s", e)
+            time.sleep(300)
+
+    t = threading.Thread(target=_loop, name="MorganPhantomPoller", daemon=True)
+    t.start()
+    log.info("Morgan: phantom verdict poller started (MorganPhantomPoller, 300s)")
+    return t
 
 
 def get_stay_out_adjustment():
@@ -104,6 +215,9 @@ def _compute_confidence(df: pd.DataFrame) -> dict:
     if streak_type == "LOSS" and streak_count >= 3: score -= 15
     score = max(0, min(100, round(score)))
     score = int(max(0, min(100, score + get_stay_out_adjustment())))
+    # Morgan individual phantom feedback delta (distinct from the aggregate
+    # stay-out quality nudge above -- no double-counting).
+    score = int(max(0, min(100, score + (get_confidence() - 50.0))))
 
     if score >= 75:   level = "HIGH"
     elif score >= 50: level = "MEDIUM"

@@ -40,6 +40,7 @@ FIELDNAMES = [
     'price_2hr',          # float — price 2 hours later
     'pnl_2hr',            # float — P&L if trade had been taken (2hr)
     'verdict',            # CORRECT / WRONG / NEUTRAL (filled after 2hr check)
+    'morgan_processed',   # 'True' once Morgan has applied individual feedback ('' = not yet)
 ]
 
 # Verdict thresholds (points)
@@ -202,6 +203,7 @@ def record_decision(market, direction_blocked, price_at_decision,
         'price_2hr':           '',
         'pnl_2hr':             '',
         'verdict':             'PENDING',
+        'morgan_processed':    '',
     }
 
     # Append row and capture its index atomically so concurrent recorders
@@ -452,3 +454,55 @@ def start_watchdog(get_historical_price_fn, interval_minutes=15):
     _watchdog_thread.start()
     logger.info("phantom_tracker: Watchdog thread started.")
     return _watchdog_thread
+
+
+def get_unprocessed_verdicts():
+    """
+    Return judged (CORRECT/WRONG) phantom rows not yet processed by Morgan's
+    individual-feedback poller. Thread-safe (shares _csv_lock). Each returned
+    dict includes at least 'timestamp', 'verdict', 'pnl_1hr'. NEUTRAL and
+    PENDING rows are excluded (they carry no individual judgment signal).
+    """
+    _ensure_csv_exists()
+    try:
+        with _csv_lock:
+            with open(PHANTOM_CSV, 'r', newline='') as f:
+                rows = list(csv.DictReader(f))
+    except Exception as e:
+        logger.error("phantom_tracker: get_unprocessed_verdicts read error: %s", e)
+        return []
+    out = []
+    for r in rows:
+        if r.get('morgan_processed') == 'True':
+            continue
+        if r.get('verdict') in ('CORRECT', 'WRONG'):
+            out.append(r)
+    return out
+
+
+def mark_processed(timestamps):
+    """
+    Mark the given decision timestamps as processed by Morgan (morgan_processed
+    = 'True') and rewrite the CSV. Thread-safe (shares _csv_lock). Rows written
+    from an older header gain the new column as needed.
+    """
+    if not timestamps:
+        return
+    ts_set = set(timestamps)
+    _ensure_csv_exists()
+    try:
+        with _csv_lock:
+            with open(PHANTOM_CSV, 'r', newline='') as f:
+                rows = list(csv.DictReader(f))
+            changed = False
+            for r in rows:
+                if r.get('timestamp') in ts_set and r.get('morgan_processed') != 'True':
+                    r['morgan_processed'] = 'True'
+                    changed = True
+            if changed:
+                with open(PHANTOM_CSV, 'w', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+                    writer.writeheader()
+                    writer.writerows(rows)
+    except Exception as e:
+        logger.error("phantom_tracker: mark_processed error: %s", e)

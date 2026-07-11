@@ -1,3 +1,19 @@
+## [1.1.0] - 2026-07-11
+### Added
+- Morgan individual phantom feedback: persistent confidence store in
+  logs/morgan_confidence.json (get_confidence/set_confidence, _morgan_lock).
+- apply_phantom_verdict_feedback(): per-verdict confidence adjustment
+  (NEUTRAL 0.0; CORRECT +raw / WRONG -raw; raw=clamp(abs(pnl)/50, 0.5, 2.0)).
+- process_new_phantom_verdicts(): daemon poller (MorganPhantomPoller, 300s)
+  applying individual feedback to unprocessed CORRECT/WRONG verdicts and
+  marking them processed (no double-counting).
+- Reported confidence now folds in the Morgan phantom delta
+  (score + (get_confidence() - 50)), distinct from the stay-out quality nudge.
+- Startup hook in main_gastrader.py launching the phantom verdict poller.
+### Audit
+- Arthur prompt (agent_brain_gas.py): audited for hardcoded win-rate/backtest/
+  historical figures. CLEAN — none present; no reset required.
+
 ## [1.0.1] - 2026-07-11
 ### Added
 - 7 flat fields to /api/state for the RoundTable overview: lancelot_status,

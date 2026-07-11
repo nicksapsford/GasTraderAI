@@ -69,7 +69,7 @@ from notifier_gas       import (
 from paper_trader_gas   import PaperTraderGas
 from performance_gas    import (
     get_performance_context, get_perf_dashboard_dict, invalidate_cache,
-    generate_milestone_review,
+    generate_milestone_review, process_new_phantom_verdicts,
 )
 from pre_checks_gas     import (
     run_all_pre_checks, run_individual_pre_checks, check_kill_switch_reset,
@@ -573,6 +573,12 @@ def main() -> None:
         phantom_tracker.start_watchdog(get_historical_price_fn=feed.get_historical_price, interval_minutes=15)
     except Exception as _exc:
         log.warning("phantom resolve/watchdog startup failed: %s", _exc)
+
+    # Morgan individual phantom feedback: poll judged verdicts and adjust confidence.
+    try:
+        process_new_phantom_verdicts()
+    except Exception as _exc:
+        log.warning("Morgan phantom verdict poller startup failed: %s", _exc)
 
     import random
     # Stagger Capital.com API calls across systems (shared demo Z6CJSM) to avoid 429s
