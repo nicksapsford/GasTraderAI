@@ -26,6 +26,8 @@ from flask import Flask, Response, jsonify, request
 import guinevere_news
 
 log = logging.getLogger("GasTrader.Dashboard")
+# ALBION STANDING RULE: all log timestamps are UTC (never BST/local). See main_gastrader.py.
+logging.Formatter.converter = time.gmtime
 logging.basicConfig(level=logging.WARNING)
 
 from pathlib import Path
@@ -47,6 +49,7 @@ VERSION_STRING = "v" + str(APP_VERSION) + " (" + get_git_hash() + ")"
 
 
 def get_stay_out_quality():
+    # ALBION RULE: phantom_trades.csv timestamps are UTC — never BST/local.
     csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs', 'phantom_trades.csv')
     if not os.path.exists(csv_path):
         return {'status': 'No data yet', 'decisions': [], 'quality_score': None,

@@ -17,6 +17,12 @@ import pandas as pd
 
 import phantom_tracker
 
+# ─── ALBION STANDING RULE: ALL TIMESTAMPS ARE UTC ────────────────────────────
+# Every timestamp this module reads or writes (trades.csv, morgan_confidence.csv,
+# phantom verdicts, log lines) is UTC — written via datetime.now(timezone.utc)
+# and read back as UTC. NEVER interpret any Albion timestamp as BST/local.
+# Confirm UTC before analysing. (Nick's standing rule, baked in 12 Jul 2026.)
+
 log = logging.getLogger("GasTrader.Morgan")
 
 
@@ -415,10 +421,11 @@ def generate_milestone_review(trades_log: Path, milestone_num: int) -> None:
 
 
 if __name__ == "__main__":
+    logging.Formatter.converter = time.gmtime  # ALBION RULE: emit log timestamps in UTC
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s  %(levelname)-8s  %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+        datefmt="%Y-%m-%d %H:%M:%S UTC",
     )
     log.info("Morgan self-test (Gas)")
     log.info("Performance context:\n%s", get_performance_context())

@@ -1,3 +1,9 @@
+## [1.1.3] - 2026-07-12
+### Fixed
+- Log timestamps now emitted in UTC (logging.Formatter.converter = time.gmtime; datefmt suffixed " UTC") across main, watchdog and dashboard. Previously local/BST, causing a +1h mismatch vs the UTC CSV artefacts (phantom_trades.csv etc.).
+### Added
+- ALBION STANDING RULE comment blocks baked into the logging setup and the log/analysis modules (phantom_tracker.py, performance_gas.py, dashboard stay-out reader): all timestamps are UTC, never BST/local.
+
 ## [1.1.2] - 2026-07-11
 ### Added
 - Silent launcher (pythonw -- no console windows); output to logs/console.log with daily rotation (7 days kept)

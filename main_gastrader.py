@@ -38,10 +38,17 @@ if _ENV_PATH.exists():
 else:
     load_dotenv()
 
+# ─── ALBION STANDING RULE: ALL LOG TIMESTAMPS ARE UTC ────────────────────────
+# Force Python's logging to emit %(asctime)s in UTC, not BST/local. Without this
+# line, logging defaults to local time and every log line is +1h vs the UTC CSV
+# artefacts (phantom_trades.csv etc.) — the exact BST/UTC mismatch that caused a
+# misread on 11 Jul 2026. Never interpret an Albion log timestamp as local time;
+# confirm UTC before analysing. (Baked in per Nick's directive, 12 Jul 2026.)
+logging.Formatter.converter = time.gmtime
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(name)-24s  %(levelname)-8s  %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+    datefmt="%Y-%m-%d %H:%M:%S UTC",
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler(LOG_DIR / "gastrader.log", encoding="utf-8"),

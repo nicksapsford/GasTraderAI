@@ -39,10 +39,12 @@ RESTART_DELAY   = 20
 MAX_RESTARTS    = 5
 RESTART_WINDOW  = 3600
 
+# ALBION STANDING RULE: all log timestamps are UTC (never BST/local). See main_gastrader.py.
+logging.Formatter.converter = time.gmtime
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+    datefmt="%Y-%m-%d %H:%M:%S UTC",
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler(LOG_FILE, encoding="utf-8"),

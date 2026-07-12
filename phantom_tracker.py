@@ -19,6 +19,12 @@ from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
+# ─── ALBION STANDING RULE: ALL TIMESTAMPS ARE UTC ────────────────────────────
+# Every timestamp this module reads or writes (phantom_trades.csv rows, log
+# lines) is UTC — written via datetime.now(timezone.utc) and read back as UTC.
+# NEVER interpret any Albion timestamp as BST/local. Confirm UTC before
+# analysing. (Nick's standing rule, baked in 12 Jul 2026.)
+
 # Path to CSV (relative to repo root)
 PHANTOM_CSV = os.path.join(os.path.dirname(__file__), 'logs', 'phantom_trades.csv')
 
