@@ -1,3 +1,8 @@
+## [1.1.4] - 2026-07-13
+### Fixed
+- Bug B: open-position floating (unrealised) P&L now computed and exposed to RoundTable (`unrealised_gbp`, spread-inclusive).
+- Bug C: "Locked P&L" now only shows once the trailing stop trails to break-even (genuine secured profit); until then "---".
+
 ## [1.1.3] - 2026-07-12
 ### Fixed
 - Log timestamps now emitted in UTC (logging.Formatter.converter = time.gmtime; datefmt suffixed " UTC") across main, watchdog and dashboard. Previously local/BST, causing a +1h mismatch vs the UTC CSV artefacts (phantom_trades.csv etc.).

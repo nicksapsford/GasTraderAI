@@ -24,6 +24,7 @@ import pandas as pd
 from flask import Flask, Response, jsonify, request
 
 import guinevere_news
+from strategy_gas import SPREAD_POINTS, DEFAULT_GBPUSD
 
 log = logging.getLogger("GasTrader.Dashboard")
 # ALBION STANDING RULE: all log timestamps are UTC (never BST/local). See main_gastrader.py.
@@ -1138,6 +1139,7 @@ def _compute_flat_fields(s: dict) -> dict:
         "arthur_confidence":     None,
         "arthur_consulted":      False,
         "locked_pnl":            None,
+        "unrealised_gbp":        None,
     }
     try:
         panel_mode = s.get("panel_mode", "pre_checks")
@@ -1195,10 +1197,26 @@ def _compute_flat_fields(s: dict) -> dict:
             entry     = float(trade.get("entry_price") or 0.0)
             stop      = float(trade.get("stop_loss") or 0.0)
             stake     = float(trade.get("stake") or 0.0)
-            if direction == "LONG":
+            # Bug C: only surface a Locked figure once the trailing stop has
+            # trailed to break-even (genuine secured profit); until then None -> "---".
+            if direction == "LONG" and stop >= entry:
                 out["locked_pnl"] = round((stop - entry) * stake, 2)
-            elif direction == "SHORT":
+            elif direction == "SHORT" and stop <= entry:
                 out["locked_pnl"] = round((entry - stop) * stake, 2)
+
+        # Bug B: floating (unrealised) P&L for the open position, in GBP.
+        #   LONG:  ((current - entry - spread) * size) / gbpusd ; SHORT mirrored.
+        if trade:
+            direction = str(trade.get("direction", "")).upper()
+            entry  = float(trade.get("entry_price") or 0.0)
+            size   = float(trade.get("size_oz") or 0.0)
+            cur    = float(s.get("gas_price_usd") or 0.0)
+            gbpusd = float(s.get("gbpusd_rate") or trade.get("gbpusd_rate") or DEFAULT_GBPUSD)
+            if cur > 0 and size > 0 and gbpusd > 0:
+                if direction == "LONG":
+                    out["unrealised_gbp"] = round(((cur - entry - SPREAD_POINTS) * size) / gbpusd, 2)
+                elif direction == "SHORT":
+                    out["unrealised_gbp"] = round(((entry - cur - SPREAD_POINTS) * size) / gbpusd, 2)
     except Exception:
         pass
     return out
