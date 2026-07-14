@@ -227,6 +227,7 @@ def _push_dashboard_live(stanley, account, ig, feed, now_utc) -> None:
         "gbpusd_rate":      gbpusd,
         "kill_switch":      account.kill_switch_active,
         "kill_tier":        account.kill_switch_tier,
+        "perf":             get_perf_dashboard_dict(),   # keep confidence exposed in ALL market states
         "updated_at":       now_utc.strftime("%Y-%m-%d %H:%M:%S UTC"),
     }
     _post(payload, "live", period, price, connector_status)

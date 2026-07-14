@@ -1,3 +1,11 @@
+## [1.1.5] - 2026-07-14
+### Fixed
+- Morgan confidence (perf.confidence_score) now included in the lightweight always-running
+  dashboard push (_push_dashboard_live), so /api/state exposes it in ALL market states --
+  including the 21:00-22:00 UTC break. Previously perf was only pushed on full candle ticks
+  (skipped when the market is closed), so RoundTable / Gaius / Chronicle showed null
+  confidence out of hours. Matches CryptoTrader (performance in every push).
+
 ## [1.1.4] - 2026-07-13
 ### Fixed
 - Bug B: open-position floating (unrealised) P&L now computed and exposed to RoundTable (`unrealised_gbp`, spread-inclusive).
