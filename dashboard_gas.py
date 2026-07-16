@@ -145,7 +145,7 @@ def load_trades() -> list:
                 "exit_time":   row["exit_time"],
                 "entry_price": f"{float(row['entry_price_usd']):,.2f}",
                 "exit_price":  f"{float(row['exit_price_usd']):,.2f}",
-                "points":      f"{float(row['points_gained']):+.1f}",
+                "points":      f"{float(row['points_gained']):+.3f}",
                 "pnl_usd":     f"{pnl_usd:+.2f}",
                 "pnl_gbp":     f"{pnl_gbp:+.2f}",
                 "gbpusd":      f"{float(row['gbpusd_rate']):.4f}",
@@ -898,7 +898,7 @@ function renderPage1(d){
     var fgbp = (points===null||isNaN(stake)) ? null : points*stake;
     var fusd = (fgbp===null||isNaN(rate)) ? null : fgbp*rate;
     var pnlcls = (fgbp===null) ? '' : (fgbp >= 0 ? 'bull' : 'bear');
-    var pointsTxt = (points===null ? '---' : (points>=0?'+':'')+points.toFixed(1));
+    var pointsTxt = (points===null ? '---' : (points>=0?'+':'')+points.toFixed(3));  /* Snag 15: gas moves in tiny increments, 1dp rounds to 0.0 */
     return '<div class="pos-card ' + pc + '">' +
       '<div class="pos-row"><span class="' + dc + '" style="font-weight:700">' + direction + '</span>' +
       '<span style="color:var(--muted)">' + (p.entry_time||'') + '</span></div>' +

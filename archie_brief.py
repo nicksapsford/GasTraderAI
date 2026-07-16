@@ -45,13 +45,24 @@ def _news_line(appender):
         sc = nd.get("score")
         appender("News sentiment: %s (score %s)" % (nd.get("sentiment", "NEUTRAL"),
                  sc if sc is not None else "--"))
-        hls = nd.get("headlines") or []
-        if hls:
-            for h in hls[:3]:
-                if isinstance(h, dict):
-                    appender("  - %s" % (h.get("title") or h.get("headline") or str(h))[:100])
-                else:
-                    appender("  - %s" % str(h)[:100])
+        # Dedup headlines by url/title -- the news API can repeat an article
+        # several times; keep the first occurrence only (Snag 16).
+        seen = set()
+        uniq = []
+        for h in (nd.get("headlines") or []):
+            if isinstance(h, dict):
+                t = (h.get("title") or h.get("headline") or "").strip()
+                k = (h.get("url") or h.get("link") or t).strip().lower()
+            else:
+                t = str(h).strip()
+                k = t.lower()
+            if not k or k in seen:
+                continue
+            seen.add(k)
+            uniq.append(t or str(h))
+        if uniq:
+            for t in uniq[:3]:
+                appender("  - %s" % t[:100])
         else:
             appender("  No current headlines")
     else:
@@ -80,6 +91,8 @@ def build_system_brief(state, system_name, asset_label, logs_dir=None, now_utc=N
             price = state[pk]
             break
     session = state.get("liquidity_period") or state.get("phase") or "--"
+    if session == "--" and "crypto" in (system_name or "").lower():
+        session = "24/7 -- Always Active"    # crypto has no session concept
     i1d = state.get("indicators_1d") or {}
     i1h = state.get("indicators_1h") or {}
     i5m = state.get("indicators_5m") or {}
@@ -123,6 +136,16 @@ def build_system_brief(state, system_name, asset_label, logs_dir=None, now_utc=N
     if isinstance(ct, dict) and ct:
         a("Direction: %s | Entry: %s" % (ct.get("direction", "--"), _num(ct.get("entry_price"), pnd)))
         a("Stop: %s | Target: %s" % (_num(ct.get("stop_loss"), pnd), _num(ct.get("take_profit"), pnd)))
+        # Points move vs entry (SHORT inverts). GasTrader moves in tiny increments
+        # ($0.01-0.10/MMBtu) so show 3dp for it; 1dp is enough elsewhere (Snag 15).
+        try:
+            _entry = float(ct.get("entry_price"))
+            _px = float(price)
+            _pts = (_entry - _px) if (ct.get("direction") or "").upper() == "SHORT" else (_px - _entry)
+            _ppd = 3 if "gas" in (system_name or "").lower() else 1
+            a("Points: %+.*f" % (_ppd, _pts))
+        except (TypeError, ValueError):
+            pass
         pnl = state.get("unrealised_gbp")
         pnl = ct.get("pnl_gbp") if pnl is None else pnl
         a("P&L GBP: %s" % _num(pnl, 2))

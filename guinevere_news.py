@@ -180,20 +180,27 @@ def fetch_gas_sentiment():
             _news_cache = result
             return result
 
-        # Score all recent headlines
+        # Score recent headlines. Dedup by url/title first -- the news API can
+        # return the same article several times, which would triple-count the
+        # sentiment score and repeat the headline in the brief/dashboard (Snag 16).
         total_score = 0
         headlines = []
-        for article in recent[:5]:  # Top 5 only
-            score = _score_headline(
-                article.get('title', ''),
-                article.get('description', '')
-            )
+        seen = set()
+        for article in recent:
+            title = (article.get('title') or '').strip()
+            key = (article.get('url') or article.get('link') or title).strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            score = _score_headline(title, article.get('description', ''))
             total_score += score
             headlines.append({
-                'title': article.get('title', ''),
+                'title': title,
                 'score': score,
                 'published': article.get('published', '')
             })
+            if len(headlines) >= 5:
+                break
 
         # Determine overall sentiment
         if total_score >= 2:
