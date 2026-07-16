@@ -1,3 +1,13 @@
+## [1.2.1] - 2026-07-16
+### Fixed
+- Snag 9: confidence bar could display 50 when the real Morgan score was 0. The
+  dashboard read `perf.confidence_score || 50`, and JS treats 0 as falsy, so a
+  legitimate 0 was replaced by the 50 fallback. Changed to
+  `(perf.confidence_score != null ? perf.confidence_score : 50)` -- 0 now shows as
+  0; 50 is used only when the value is genuinely absent. In practice only GasTrader
+  showed the wrong value (the only system with a 0 score, from a 5-loss streak); the
+  latent bug was in all 6 dashboards. RoundTable was already correct.
+
 ## [1.2.0] - 2026-07-16
 ### Changed
 - FULL recalibration to NatGas's real ~$2.89/MMBtu scale (Nick & Archie sign-off, 60-day

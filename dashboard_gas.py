@@ -644,7 +644,7 @@ function renderPerfCard(perf){
     return '<div class="card"><div class="card-title gas">Arthur Self-Performance</div>' +
       '<div style="color:var(--muted);font-size:11px;text-align:center;padding:8px 0">No trades yet -- system ready</div></div>';
   }
-  var score  = perf.confidence_score || 50;
+  var score  = (perf.confidence_score != null ? perf.confidence_score : 50);
   var level  = perf.confidence_level || 'MEDIUM';
   var sc     = level==='HIGH' ? 'score-high' : (level==='LOW'||level==='VERY_LOW') ? 'score-low' : 'score-med';
   var lc     = level==='HIGH' ? 'bull'       : (level==='LOW'||level==='VERY_LOW') ? 'bear'      : 'neut';
@@ -968,7 +968,7 @@ function renderPage2(d){
   if(total === 0){
     perfHTML = '<div style="color:var(--muted);font-size:12px;padding:16px 0;text-align:center">No trades yet -- system ready</div>';
   } else {
-    var score  = perf.confidence_score || 50;
+    var score  = (perf.confidence_score != null ? perf.confidence_score : 50);
     var level  = perf.confidence_level || 'MEDIUM';
     var sc     = level==='HIGH' ? 'score-high' : (level==='LOW'||level==='VERY_LOW') ? 'score-low' : 'score-med';
     var lc     = level==='HIGH' ? 'bull'       : (level==='LOW'||level==='VERY_LOW') ? 'bear'      : 'neut';
