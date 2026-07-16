@@ -31,8 +31,11 @@ PHANTOM_CSV = os.path.join(os.path.dirname(__file__), 'logs', 'phantom_trades.cs
 # Serialises all reads/writes of the CSV across threads.
 _csv_lock = threading.Lock()
 
-# CSV column headers
-FIELDNAMES = [
+# CSV column headers.
+# Base schema (14 cols) -- DO NOT reorder or move; downstream (Chronicle, Gaius)
+# read by column name, and the indicator columns below are appended to the RIGHT
+# so these positions never change.
+_BASE_FIELDS = [
     'timestamp',          # UTC ISO format
     'market',             # e.g. FTSE, GOLD, BTC, ETH, US500
     'direction_blocked',  # LONG or SHORT
@@ -49,18 +52,145 @@ FIELDNAMES = [
     'morgan_processed',   # 'True' once Morgan has applied individual feedback ('' = not yet)
 ]
 
+# Indicator snapshot AT SIGNAL TIME (Gaius Commission 001, Priority 1 -- 16 Jul
+# 2026). Appended to the RIGHT so existing column positions never move and old
+# rows simply show these as empty. Populated via build_snapshot() from the values
+# Merlin already fetched for Arthur -- this is NOT a new data fetch.
+INDICATOR_COLUMNS = [
+    'ssl_daily', 'ssl_1hr', 'ssl_5min',        # BULL / BEAR
+    'rsi_daily', 'rsi_1hr', 'rsi_5min',        # numeric
+    'tmo_1hr', 'tmo_5min',                     # numeric
+    'macd_1hr', 'macd_5min',                   # numeric (histogram)
+    'chande_mo_1hr', 'chande_mo_5min',         # numeric
+    'money_flow_1hr', 'money_flow_5min',       # numeric
+    'morgan_score',                            # Morgan confidence score at signal time
+    'session',                                 # ASIAN/LONDON/OVERLAP/NEW_YORK/... or CLOSED
+    'guinevere_score',                         # sentiment score, '' if no news module
+]
+
+FIELDNAMES = _BASE_FIELDS + INDICATOR_COLUMNS
+
 # Verdict thresholds (points)
 VERDICT_THRESHOLD = 10  # price must move >10 pts to be CORRECT or WRONG
 
 
+# ─── Indicator snapshot helpers ──────────────────────────────────────────────
+def _session_from_utc(now_utc):
+    """UTC-hour session label for systems with no market-hours session of their
+    own (e.g. 24/7 CryptoTrader). Systems with real sessions pass their own."""
+    try:
+        h = now_utc.hour
+    except Exception:
+        return ''
+    if h < 7:
+        return 'ASIAN'
+    if h < 12:
+        return 'LONDON'
+    if h < 16:
+        return 'OVERLAP'
+    if h < 21:
+        return 'NEW_YORK'
+    return 'AFTER_HOURS'
+
+
+def _num(v, ndigits=4):
+    """Round a numeric to ndigits dp; '' for None / blank / non-numeric."""
+    if v is None or v == '':
+        return ''
+    try:
+        return round(float(v), ndigits)
+    except (TypeError, ValueError):
+        return ''
+
+
+def _ssl(ind):
+    """'BULL'/'BEAR' from an indicator/bar dict's ssl_bull flag; '' if unknown."""
+    if not ind:
+        return ''
+    v = ind.get('ssl_bull')
+    if v is None:
+        return ''
+    return 'BULL' if v else 'BEAR'
+
+
+def build_snapshot(ind_1d=None, ind_1h=None, ind_5m=None,
+                   morgan_score=None, session=None, guinevere_score=None,
+                   now_utc=None):
+    """Build the indicator-snapshot columns for a phantom row from the values
+    Merlin already fetched for Arthur -- this is NOT a new data fetch.
+
+    ind_1d / ind_1h / ind_5m: bar or indicator dicts exposing ssl_bull, rsi,
+        macd, tmo_main, chande_mo, money_flow. Any missing value comes out ''.
+    morgan_score: numeric Morgan confidence at signal time.
+    session: the system's own session label (may be CLOSED); if None and now_utc
+        is given, a UTC-hour session is derived (for 24/7 systems).
+    guinevere_score: sentiment score, or None if the system has no news module.
+
+    Defensive: unknown keys / None dicts just come out empty. Callers still wrap
+    the call so a snapshot failure can never stop the phantom row being recorded.
+    """
+    if session is None and now_utc is not None:
+        session = _session_from_utc(now_utc)
+    g = lambda ind, k: (ind.get(k) if isinstance(ind, dict) else None)
+    return {
+        'ssl_daily':       _ssl(ind_1d),
+        'ssl_1hr':         _ssl(ind_1h),
+        'ssl_5min':        _ssl(ind_5m),
+        'rsi_daily':       _num(g(ind_1d, 'rsi')),
+        'rsi_1hr':         _num(g(ind_1h, 'rsi')),
+        'rsi_5min':        _num(g(ind_5m, 'rsi')),
+        'tmo_1hr':         _num(g(ind_1h, 'tmo_main')),
+        'tmo_5min':        _num(g(ind_5m, 'tmo_main')),
+        'macd_1hr':        _num(g(ind_1h, 'macd')),
+        'macd_5min':       _num(g(ind_5m, 'macd')),
+        'chande_mo_1hr':   _num(g(ind_1h, 'chande_mo')),
+        'chande_mo_5min':  _num(g(ind_5m, 'chande_mo')),
+        'money_flow_1hr':  _num(g(ind_1h, 'money_flow')),
+        'money_flow_5min': _num(g(ind_5m, 'money_flow')),
+        'morgan_score':    _num(morgan_score, 2),
+        'session':         session or '',
+        'guinevere_score': _num(guinevere_score, 4) if guinevere_score is not None else '',
+    }
+
+
+def _migrate_header_if_needed():
+    """One-time in-place upgrade: if phantom_trades.csv exists with an older
+    header, append any missing columns to the RIGHT and pad existing rows with ''
+    (mapping by column name, so existing positions are preserved). No-op once the
+    header is current. Guarded by _csv_lock; callers invoke it OUTSIDE the lock."""
+    if not os.path.exists(PHANTOM_CSV):
+        return
+    with _csv_lock:
+        with open(PHANTOM_CSV, 'r', newline='') as f:
+            rows = list(csv.reader(f))
+        if not rows or rows[0] == FIELDNAMES:
+            return
+        header = rows[0]
+        idx = {name: i for i, name in enumerate(header)}
+        migrated = [
+            [(r[idx[name]] if name in idx and idx[name] < len(r) else '')
+             for name in FIELDNAMES]
+            for r in rows[1:]
+        ]
+        with open(PHANTOM_CSV, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(FIELDNAMES)
+            writer.writerows(migrated)
+        logger.info("phantom_tracker: migrated phantom_trades.csv header "
+                    "%d -> %d columns", len(header), len(FIELDNAMES))
+
+
 def _ensure_csv_exists():
-    """Create logs directory and CSV with headers if not present."""
+    """Create logs directory and CSV with headers if not present; otherwise
+    migrate an older header in place so new indicator columns are available."""
     os.makedirs(os.path.dirname(PHANTOM_CSV), exist_ok=True)
     if not os.path.exists(PHANTOM_CSV):
         with open(PHANTOM_CSV, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
             writer.writeheader()
         logger.info("phantom_tracker: Created phantom_trades.csv")
+        return
+    _migrate_header_if_needed()
 
 
 def _calculate_pnl(direction_blocked, price_at_decision, price_later):
@@ -175,7 +305,8 @@ def _update_row(row_index, market, direction_blocked,
 
 
 def record_decision(market, direction_blocked, price_at_decision,
-                    confidence, reason_for_stay_out, get_price_fn=None):
+                    confidence, reason_for_stay_out, get_price_fn=None,
+                    indicators=None):
     """
     Call this after every STAY OUT decision in the main loop.
 
@@ -187,6 +318,10 @@ def record_decision(market, direction_blocked, price_at_decision,
         reason_for_stay_out: str  — reason code or description
         get_price_fn:        callable(market) → float — price fetcher
                              (pass in Merlin's price function)
+        indicators:          optional dict from build_snapshot() — the indicator
+                             snapshot at signal time. Missing/None leaves those
+                             columns blank; it must NEVER stop the row being
+                             recorded (callers build it defensively).
     """
     _ensure_csv_exists()
 
@@ -195,22 +330,21 @@ def record_decision(market, direction_blocked, price_at_decision,
 
     timestamp = datetime.now(timezone.utc).isoformat()
 
-    new_row = {
+    new_row = {name: '' for name in FIELDNAMES}
+    new_row.update({
         'timestamp':           timestamp,
         'market':              market,
         'direction_blocked':   direction_blocked,
         'price_at_decision':   price_at_decision,
         'confidence':          confidence,
         'reason_for_stay_out': reason_for_stay_out,
-        'price_30min':         '',
-        'pnl_30min':           '',
-        'price_1hr':           '',
-        'pnl_1hr':             '',
-        'price_2hr':           '',
-        'pnl_2hr':             '',
         'verdict':             'PENDING',
-        'morgan_processed':    '',
-    }
+    })
+    if indicators:
+        for col in INDICATOR_COLUMNS:
+            val = indicators.get(col)
+            if val is not None:
+                new_row[col] = val
 
     # Append row and capture its index atomically so concurrent recorders
     # (e.g. BTC and ETH) can't hand the same index to two background threads.

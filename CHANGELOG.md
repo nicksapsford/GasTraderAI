@@ -1,3 +1,17 @@
+## [1.1.6] - 2026-07-16
+### Added
+- Job 1 (Gaius Commission 001, Priority 1): indicator snapshot at signal time in
+  phantom_trades.csv. 17 columns APPENDED to the right of the existing 14-col schema
+  (existing positions unchanged): ssl_daily/1hr/5min, rsi_daily/1hr/5min,
+  tmo_1hr/5min, macd_1hr/5min, chande_mo_1hr/5min, money_flow_1hr/5min, morgan_score,
+  session, guinevere_score. Captured from values Merlin already fetched for Arthur
+  (no new data fetch) via phantom_tracker.build_snapshot() -> record_decision(indicators=).
+  The snapshot build is wrapped in its own try/except so a failure can never stop a
+  phantom row being written. phantom_tracker now migrates an older 14-col file in place
+  on first use (old rows keep positions; new columns blank). Chronicle & Gaius read by
+  column name and are unaffected. (guinevere_score currently blank pending a safe cached
+  source -- column reserved.)
+
 ## [1.1.5] - 2026-07-14
 ### Fixed
 - Morgan confidence (perf.confidence_score) now included in the lightweight always-running

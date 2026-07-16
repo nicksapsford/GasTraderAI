@@ -74,6 +74,7 @@ from notifier_gas       import (
     notify_daily_summary, notify_system_error,
 )
 from paper_trader_gas   import PaperTraderGas
+import performance_gas
 from performance_gas    import (
     get_performance_context, get_perf_dashboard_dict, invalidate_cache,
     generate_milestone_review, process_new_phantom_verdicts,
@@ -416,6 +417,15 @@ def run_candle_tick(feed, stanley, account, ig) -> None:
         log.info("Arthur says STAY_OUT -- no action")
         try:
             _dir = proposed_direction if proposed_direction in ("LONG", "SHORT") else ("LONG" if (bar_1d and bar_1d.get("ssl_bull")) else "SHORT")
+            try:
+                _snap = phantom_tracker.build_snapshot(
+                    ind_1d, ind_1h, ind_5m,
+                    morgan_score=performance_gas.get_confidence(),
+                    session=period,
+                )
+            except Exception as _se:
+                log.warning("phantom indicator snapshot failed: %s", _se)
+                _snap = None
             phantom_tracker.record_decision(
                 market="GAS",
                 direction_blocked=_dir,
@@ -423,6 +433,7 @@ def run_candle_tick(feed, stanley, account, ig) -> None:
                 confidence=decision.get("confidence"),
                 reason_for_stay_out="ARTHUR_STAY_OUT",
                 get_price_fn=lambda m: _get_price(ig, feed),
+                indicators=_snap,
             )
         except Exception as _exc:
             log.warning("phantom_tracker record failed: %s", _exc)
