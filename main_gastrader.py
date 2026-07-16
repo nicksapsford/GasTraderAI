@@ -607,7 +607,13 @@ def main() -> None:
             set_confidence(_saved_conf, reason='restore')
             log.info("Morgan: confidence restored from CSV -> %.1f", _saved_conf)
         else:
-            log.info("Morgan: no persisted confidence found -- starting at baseline 50")
+            # No persisted confidence yet -- initialise morgan_confidence.csv at the
+            # baseline so Morgan is visibly active and the file exists (Job 3).
+            # GasTrader had only NEUTRAL phantom verdicts, so nothing had ever
+            # triggered a confidence write.
+            set_confidence(performance_gas.get_confidence(), reason='init')
+            log.info("Morgan: no persisted confidence -- initialised morgan_confidence.csv "
+                     "at baseline %.1f", performance_gas.get_confidence())
     except Exception as _exc:
         log.warning("Morgan confidence restore failed: %s", _exc)
 

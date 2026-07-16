@@ -1,3 +1,16 @@
+## [1.1.7] - 2026-07-16
+### Fixed
+- Job 3 (Gaius Commission 001, Priority 3): GasTrader had no morgan_confidence.csv, so
+  Morgan read the 50/MEDIUM fallback and could not persist. Root cause: the file is
+  only written by set_confidence(), which fires on a CORRECT/WRONG phantom verdict or
+  on startup-restore when a value already exists -- GasTrader had only NEUTRAL phantom
+  verdicts and no prior file, so neither path ever ran. The startup restore's
+  no-saved-value branch only logged the baseline without writing. Fix: initialise
+  morgan_confidence.csv at the baseline on startup when none exists
+  (set_confidence(get_confidence(), reason='init')). The Morgan module itself was
+  correct and active; the phantom-verdict feedback loop is intact and will adjust the
+  score once non-NEUTRAL verdicts arrive.
+
 ## [1.1.6] - 2026-07-16
 ### Added
 - Job 1 (Gaius Commission 001, Priority 1): indicator snapshot at signal time in
