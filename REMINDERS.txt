@@ -4,17 +4,20 @@
 
 INSTRUMENT
   Capital.com epic:   NATURALGAS   (verified against demo API 2026-07-06)
-  Priced in:          USD per MMBtu (~$4,155/MMBtu)
+  Priced in:          USD per MMBtu (~$2.89/MMBtu)
+  Point convention:   1 point = $1.00/MMBtu ($0.15 move = 0.15 pts; NEVER x100)
   Yahoo fallback:     NG=F (natural gas futures)
 
-RISK / SIZING (confirmed & approved)
-  Stop distance:      30 points ($30/MMBtu)
-  Stake:              ~£0.67 per point
-  Position size:      ~0.90 oz  (recomputed each trade from live GBPUSD)
-  Max risk/trade:     £20  (2% of £1,000)
-  Take profit:        150 points ($150/MMBtu) safety ceiling
+RISK / SIZING (recalibrated 16 Jul 2026, Nick & Archie sign-off -- 60d NG=F backtest)
+  Stop distance:      0.15 points ($0.15/MMBtu)  ~1.2x median daily range ($0.12)
+  Stake:              ~£133 per point  (scales inversely with the stop distance)
+  Position size:      ~178 oz  (recomputed each trade from live GBPUSD)
+  Max risk/trade:     £20  (2% of £1,000) -- full stop-out
+  Take profit:        0.75 points ($0.75/MMBtu) 5:1 safety ceiling (stop exits first)
   Daily loss limit:   £60  (6% -- kill switch)
-  Spread:             0.30 points (negligible cost)
+  Spread:             0.005 points ($0.005/MMBtu, confirmed Capital.com demo)
+  NOTE: prior 30-60 / 150-300 point stop/target were a larger-instrument scale --
+  a $30-60/MMBtu stop on a ~$2.89 instrument was unreachable (no real protection).
 
 TIMING (all UTC)
   Market open:        23h/day Mon-Fri. Opens Sun 22:00, closes Fri 21:00.
@@ -26,7 +29,7 @@ TIMING (all UTC)
 CRITICAL BEFORE GOING LIVE
   * Confirm the REAL margin factor for NATURALGAS on Capital.com.
     The demo API reported 100% (almost certainly a demo artifact -- real gas
-    margin is ~5%). At ~0.90 oz notional (~£2,800) you need enough margin.
+    margin is ~5%). At ~178 oz x ~$2.89 = ~$515 notional (~£385) you need enough margin.
     Your STOP-LOSS risk is still capped at £20 regardless of margin.
   * Verify US CPI dates against the official BLS schedule -- calendar_gas.py
     currently APPROXIMATES CPI as the 2nd Wednesday of each month (13:30 UTC).

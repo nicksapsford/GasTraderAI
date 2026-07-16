@@ -4,11 +4,20 @@ natural gas spread betting strategy mechanics.
 Points-based trailing stop. Prices are in USD per MMBtu; P&L is computed
 in USD then converted to GBP using the live GBPUSD rate from Capital.com.
 
-Sizing (confirmed/approved settings):
-  Stop distance:   60 points ($60/MMBtu)   (widened for Natural Gas volatility)
-  Take profit:     300 points ($300/MMBtu) safety ceiling
-  Max risk/trade:  £20  (2% of £1,000)
-  => stake sized so a full stop-out risks ~£20  (varies slightly with GBPUSD)
+POINT CONVENTION: 1 point = $1.00 per MMBtu. A $0.15 price move = 0.15 points.
+Never multiply points by 100.
+
+Sizing (recalibrated 16 Jul 2026, Nick & Archie sign-off -- 60-day NG=F backtest):
+  Stop distance:   0.15 points ($0.15/MMBtu)  ~1.2x NatGas median daily range
+                   ($0.121), ~5% of price, ~2% backtest whipsaw
+  Take profit:     0.75 points ($0.75/MMBtu)  5:1 R:R safety ceiling (the trailing
+                   stop is the real exit)
+  Spread:          0.005 points ($0.005/MMBtu, confirmed Capital.com demo)
+  Max risk/trade:  £20  (2% of £1,000) -- stake sized so a full stop-out risks ~£20
+                   (position size scales inversely with the stop distance)
+  NOTE: the earlier 60/300 values were inherited from a larger-instrument scale --
+  a $60/MMBtu stop on a ~$2.89 instrument sits at -$57/+$63, i.e. UNREACHABLE
+  (no real stop protection; force-close at 20:45 UTC was the de-facto exit).
 """
 
 import logging
@@ -20,11 +29,14 @@ log = logging.getLogger("GasTrader.Strategy")
 
 # ── Settings ──────────────────────────────────────────────────────────────────
 
-# Natural Gas is highly volatile, especially around EIA Gas Storage reports (Thu 14:30 UTC). Stops and targets widened to accommodate typical NATURALGAS intraday ranges.
-TRAILING_STOP_POINTS   = 60.0    # trailing stop in gas points ($/MMBtu)
-TAKE_PROFIT_POINTS     = 300.0   # safety ceiling (trailing stop exits first in practice)
+# NatGas point convention: 1 point = $1.00/MMBtu (NEVER multiply by 100). Values
+# recalibrated 16 Jul 2026 (Nick & Archie sign-off) from a 60-day NG=F backtest to
+# NatGas's real ~$2.89 scale. The EIA Gas Storage window (Thu 14:15-15:00 UTC) is a
+# hard block, so the stop need not absorb EIA spikes.
+TRAILING_STOP_POINTS   = 0.15    # trailing stop, $0.15/MMBtu (~1.2x median daily range)
+TAKE_PROFIT_POINTS     = 0.75    # 5:1 safety ceiling (trailing stop exits first in practice)
 MAX_RISK_PER_TRADE_GBP = 20.0    # max GBP loss per trade (2% of £1,000)
-SPREAD_POINTS          = 0.3     # Capital.com gas spread (very low cost)
+SPREAD_POINTS          = 0.005   # Capital.com NatGas spread ($/MMBtu), confirmed demo 16 Jul 2026
 DEFAULT_GBPUSD         = 1.27    # conservative fallback if live rate unavailable
 
 # Force close 15 minutes before the 21:00 UTC daily close -- NEVER hold overnight.
@@ -66,7 +78,9 @@ def calculate_size(stop_pts: float = TRAILING_STOP_POINTS,
     """
     Position size in MMBtu so that a full stop-out loses ~risk_gbp.
       risk_gbp = stop_pts * size_oz / gbpusd   =>   size_oz = risk_gbp * gbpusd / stop_pts
-    At GBPUSD 1.3376 this is ~0.89 oz for a 30pt stop and £20 risk.
+    At GBPUSD 1.3376, £20 risk with the 0.15pt stop => ~178 oz. Size scales
+    inversely with the stop distance (a tighter stop => a larger position for the
+    same £ risk).
     """
     if stop_pts <= 0:
         return 0.0

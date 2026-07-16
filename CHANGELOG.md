@@ -1,3 +1,23 @@
+## [1.2.0] - 2026-07-16
+### Changed
+- FULL recalibration to NatGas's real ~$2.89/MMBtu scale (Nick & Archie sign-off, 60-day
+  NG=F backtest). Prior values were inherited from a larger-instrument scale.
+  * strategy_gas.py: TRAILING_STOP_POINTS 60 -> 0.15 ($/MMBtu, ~1.2x median daily range;
+    the old $60 stop sat at -$57/+$63, UNREACHABLE -- no real protection).
+    TAKE_PROFIT_POINTS 300 -> 0.75 (5:1 safety ceiling). SPREAD_POINTS 0.3 -> 0.005
+    (confirmed Capital.com demo).
+  * phantom_tracker.py: VERDICT_THRESHOLD 10 -> 0.06 (40% of the 0.15 stop). NEW verdicts
+    only; existing NEUTRAL rows unchanged.
+  * agent_brain_gas.py: Arthur prompt updated to new stop/target/spread + a POINT
+    CONVENTION statement (1 point = $1/MMBtu, never x100); position display :+.1f -> :+.3f;
+    self-test price 4160 -> 2.90.
+  * REMINDERS.txt: price ~$4,155 -> ~$2.89; stop/target/spread/size corrected.
+  * paper_trader_gas.py: self-test prices ~4155 -> ~2.88 scale.
+### Risk note
+- GasTrader had no effective hard stop since launch (unreachable 60-pt stop; the 20:45
+  force-close was the de-facto exit). This restores real stop protection (loss capped
+  ~£20/trade). Position size now scales inversely with the stop -> ~178 oz, ~400x larger
+  than before. Review the first live sessions closely.
 ## [1.1.7] - 2026-07-16
 ### Fixed
 - Job 3 (Gaius Commission 001, Priority 3): GasTrader had no morgan_confidence.csv, so

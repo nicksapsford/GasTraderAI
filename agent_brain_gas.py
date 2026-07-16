@@ -44,12 +44,13 @@ before the 21:00 UTC daily close. Overnight financing costs money -- avoid it.
 
 INSTRUMENT CONTEXT
 Natural Gas (NATURALGAS on Capital.com) is priced in USD per MMBtu (typically ~$2-4/MMBtu).
-Stake: ~£0.44 per point. Stop: 60 points ($60/MMBtu-equivalent points). Position sized
-so a full stop-out risks ~£20 (2% of £1,000).
-Trailing stop: 60 points -- Natural Gas is VERY volatile (far more than Gold or oil),
-so stops are set wide to give the trade room to breathe; do NOT exit on noise.
-Take profit: 300 points (safety ceiling -- the trailing stop exits first in practice).
-Spread is tiny (0.30 points) -- trading cost is negligible.
+POINT CONVENTION: 1 point = $1.00 per MMBtu. A $0.15 price move = 0.15 points. Never
+multiply by 100.
+Stop: 0.15 points ($0.15/MMBtu) trailing -- ~1.2x NatGas's median daily range ($0.12),
+wide enough to ride normal hourly noise (~$0.02/hr) but tight enough to cut a real adverse
+move; do NOT exit on noise. Position sized so a full stop-out risks ~£20 (2% of £1,000).
+Take profit: 0.75 points ($0.75/MMBtu) -- a 5:1 safety ceiling; the trailing stop is the
+real exit. Spread is tiny (0.005 points) -- trading cost is negligible.
 P&L is made in USD and converted to GBP at the live GBPUSD rate (given below).
 Both LONG and SHORT are viable.
 
@@ -60,11 +61,12 @@ catalyst), LNG export demand, US pipeline capacity, Gulf of Mexico hurricane sea
 and Russian gas supply to Europe.
 Cold snaps, storage draws, LNG demand and supply disruptions push gas UP; mild weather,
 storage builds, record production and LNG gluts push it DOWN.
-Daily range is typically ~$0.10-0.50/MMBtu, and much wider on EIA storage days.
+Daily range is typically ~$0.10-0.30/MMBtu (median ~$0.12), and wider on EIA storage days.
 SEASONAL BIAS: winter (Oct-Mar) is bullish-leaning on heating demand; summer is moderate
 (cooling demand); spring/autumn shoulder seasons are range-bound.
-Natural gas has LOW correlation with equities (~0.1) and VERY HIGH volatility --
-which is exactly why stops and targets are set wide.
+Natural gas has LOW correlation with equities (~0.1) and high volatility relative to its
+low price -- the 0.15-point stop is calibrated to that ($0.15 is already ~1.2x the median
+daily range); "volatile" does not mean it needs a huge stop.
 Best trends form during the London and New York sessions.
 
 LIQUIDITY PERIODS (UTC) -- you are told the current one each tick:
@@ -108,7 +110,7 @@ HARD RULES -- NEVER VIOLATE
 4.  Never hold overnight -- force close by 20:45 UTC.
 5.  No new entries after 20:30 UTC (Lancelot enforces this too).
 6.  In the Asian session, demand higher conviction (thin, choppy markets).
-7.  60-point stop gives room -- do NOT exit early on noise.
+7.  0.15-point stop gives room -- do NOT exit early on noise.
 8.  When in doubt -- STAY OUT. A STAY_OUT is often the BEST decision.
 9.  If conservative mode active (Morgan confidence <25): hard STAY_OUT.
 
@@ -155,7 +157,7 @@ def _format_indicators(bar_1d, bar_1h, bar_5m, current_price, liquidity_period,
               else (current_trade.entry_price - current_price)
         position_text = (
             f"OPEN {current_trade.direction} | entry=${current_trade.entry_price:,.2f} | "
-            f"current=${current_price:,.2f} | pts_from_entry={pts:+.1f} | "
+            f"current=${current_price:,.2f} | pts_from_entry={pts:+.3f} | "
             f"stop=${current_trade.stop_loss:,.2f} | target=${current_trade.take_profit:,.2f} | "
             f"size={current_trade.size_oz:.2f}oz | stake=£{current_trade.stake:.4f}/pt | "
             f"{current_trade.liquidity_period}"
@@ -336,9 +338,9 @@ if __name__ == "__main__":
                         "tmo_main": 2.1, "tmo_smooth": 1.5, "chande_mo": 45.0, "money_flow": 150.0})
     bar_5m = pd.Series({"ssl_bull": True, "rsi": 58.0, "macd_histogram": 2.5,
                         "tmo_main": 0.8, "tmo_smooth": 0.5, "chande_mo": 30.0, "money_flow": 80.0,
-                        "open": 4150.0, "close": 4160.0})
+                        "open": 2.88, "close": 2.90})
     decision = get_trading_decision(
-        bar_1h=bar_1h, bar_5m=bar_5m, current_price=4160.0,
+        bar_1h=bar_1h, bar_5m=bar_5m, current_price=2.90,
         liquidity_period="OVERLAP", bar_1d=bar_1d, gbpusd_rate=1.3376,
     )
     print(format_decision_for_display(decision))
