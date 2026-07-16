@@ -21,6 +21,43 @@ def _ssl(ind):
     return "BULL" if ind.get("ssl_bull") else "BEAR"
 
 
+def _guinevere_kind(system_name):
+    """Which Guinevere module a system runs: news (Gold/Oil/Gas have guinevere_news),
+    calendar-only (FTSE/US, and Crypto's economic calendar), else none."""
+    n = (system_name or "").lower()
+    if any(x in n for x in ("gold", "oil", "gas")):
+        return "news"
+    if any(x in n for x in ("ftse", "us", "crypto")):
+        return "calendar"
+    return "none"
+
+
+def _news_line(appender):
+    """Append cached Guinevere news sentiment + top headlines (no new external
+    fetch -- reads the in-process guinevere_news cache the dashboard already polls)."""
+    nd = None
+    try:
+        import guinevere_news
+        nd = getattr(guinevere_news, "_news_cache", None)
+    except Exception:
+        nd = None
+    if isinstance(nd, dict) and nd.get("sentiment") and (nd.get("timestamp") or nd.get("headlines")):
+        sc = nd.get("score")
+        appender("News sentiment: %s (score %s)" % (nd.get("sentiment", "NEUTRAL"),
+                 sc if sc is not None else "--"))
+        hls = nd.get("headlines") or []
+        if hls:
+            for h in hls[:3]:
+                if isinstance(h, dict):
+                    appender("  - %s" % (h.get("title") or h.get("headline") or str(h))[:100])
+                else:
+                    appender("  - %s" % str(h)[:100])
+        else:
+            appender("  No current headlines")
+    else:
+        appender("News module active -- awaiting sentiment poll")
+
+
 def _morgan_journey(logs_dir):
     """(start, current) confidence from morgan_confidence.csv, else (None, None)."""
     try:
@@ -109,10 +146,21 @@ def build_system_brief(state, system_name, asset_label, logs_dir=None, now_utc=N
       soq.get("quality_score") if soq.get("quality_score") is not None else "--"))
     a("Correct: %s | Wrong: %s | Neutral: %s" % (
         soq.get("correct", 0), soq.get("wrong", 0), soq.get("neutral", 0)))
-    a("Net Saved: GBP %s | Net Missed: GBP %s" % (_num(soq.get("net_saved", 0), 2), _num(soq.get("net_missed", 0), 2)))
+    # Net Saved is always shown positive (money saved by correct stay-outs);
+    # Net Missed always negative (money missed) -- matches the dashboard's
+    # +abs(saved) / -abs(missed) display. Stored net_saved is negative.
+    _sv = abs(float(soq.get("net_saved", 0) or 0))
+    _ms = abs(float(soq.get("net_missed", 0) or 0))
+    a("Net Saved: GBP +%s | Net Missed: GBP -%s" % (_num(_sv, 2), _num(_ms, 2)))
     a("")
     a("GUINEVERE")
-    a(str(cal) if cal else "No Guinevere data")
+    gkind = _guinevere_kind(system_name)
+    if gkind == "news":
+        _news_line(a)
+    elif gkind == "calendar":
+        a("Calendar only -- no news module (calendar shown under MARKET)")
+    else:
+        a("No Guinevere module")
     a("")
     a("LANCELOT PRE-CHECKS")
     pc = state.get("pre_checks")
@@ -123,9 +171,18 @@ def build_system_brief(state, system_name, asset_label, logs_dir=None, now_utc=N
         a("  %s" % (state.get("lancelot_status") or "n/a"))
     a("")
     a("SYSTEM")
+    # CryptoTrader (TideTraderAI) exposes neither 'mode' nor 'connector_status'
+    # in /api/state; it is Kraken paper trading and derives feed health from
+    # last-update freshness (same as its dashboard). Map both robustly.
+    mode = state.get("mode") or "PAPER"
     cs = state.get("connector_status")
-    feed = "OK" if cs in ("capitalcom", "kraken", "ig", "yahoo") else (cs or "--")
-    a("Mode: %s | Version: %s | Feed: %s" % (state.get("mode", "--"), ver, feed))
+    if cs:
+        feed = "OK" if cs in ("capitalcom", "kraken", "ig", "yahoo") else cs
+    elif state.get("last_update_utc") or state.get("last_update") or state.get("updated_at"):
+        feed = "OK"
+    else:
+        feed = "--"
+    a("Mode: %s | Version: %s | Feed: %s" % (mode, ver, feed))
     a(BAR)
     a("End of %s Archie Brief" % system_name)
     a(BAR)
