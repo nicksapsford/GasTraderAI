@@ -1113,6 +1113,49 @@ setInterval(refreshDashboard, 5000);
 pollNews();
 setInterval(pollNews, 60000);
 </script>
+<!-- ARCHIE BRIEF (Job 5) -->
+<script>
+(function(){
+  var ARCHIE_LABEL = '&#9993; Archie Brief';
+  function fallback(txt, done){
+    var ta=document.createElement('textarea');
+    ta.value=txt; ta.style.position='fixed'; ta.style.top='-2000px'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    try{ document.execCommand('copy'); }catch(e){}
+    document.body.removeChild(ta); done();
+  }
+  function copyText(txt, btn){
+    function done(){
+      btn.classList.add('archie-copied');
+      btn.textContent='Copied!';
+      setTimeout(function(){ btn.classList.remove('archie-copied'); btn.innerHTML=ARCHIE_LABEL; },2000);
+    }
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt).then(done, function(){ fallback(txt, done); });
+    } else { fallback(txt, done); }
+  }
+  window.archieBrief=function(btn){
+    btn.textContent='...';
+    fetch('/api/archie-brief').then(function(r){return r.text();}).then(function(txt){
+      copyText(txt, btn);
+    }).catch(function(){ btn.textContent='Error'; setTimeout(function(){ btn.innerHTML=ARCHIE_LABEL; },2000); });
+  };
+  function inject(){
+    if(document.getElementById('archieBtn')) return;
+    var st=document.createElement('style');
+    st.textContent='.archie-btn{background:rgba(52,152,219,0.10);border:1px solid #3498db;color:#3498db;padding:4px 9px;border-radius:4px;font-size:10px;cursor:pointer;letter-spacing:0.5px;text-transform:uppercase;transition:background 0.15s;}.archie-btn:hover{background:rgba(52,152,219,0.25);}.archie-btn.archie-copied{background:rgba(46,204,113,0.22);border-color:#2ecc71;color:#2ecc71;}';
+    document.head.appendChild(st);
+    var btn=document.createElement('button');
+    btn.id='archieBtn'; btn.className='archie-btn'; btn.type='button';
+    btn.innerHTML=ARCHIE_LABEL; btn.setAttribute('onclick','archieBrief(this)');
+    var sd=document.querySelector('.shutdown-btn');
+    if(sd && sd.parentNode){ sd.parentNode.insertBefore(btn, sd); }
+    else { var hr=document.querySelector('.header-right')||document.querySelector('.header'); if(hr){ hr.appendChild(btn); } }
+  }
+  if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', inject); }
+  else { inject(); }
+})();
+</script>
 </body>
 </html>"""
 
@@ -1220,6 +1263,19 @@ def _compute_flat_fields(s: dict) -> dict:
     except Exception:
         pass
     return out
+
+
+@app.route("/api/archie-brief")
+def api_archie_brief():
+    """Plain-text snapshot of current dashboard state for pasting to Archie."""
+    import json as _json
+    import archie_brief
+    try:
+        state = _json.loads(api_state().get_data(as_text=True))
+    except Exception:
+        state = get_state()
+    txt = archie_brief.build_system_brief(state, "GasTrader", "Natural Gas", str(LOG_DIR))
+    return txt, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
 @app.route("/api/state")
