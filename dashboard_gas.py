@@ -726,7 +726,7 @@ function renderNewsCard(n){
   if(noKey){
     body = '<div style="color:var(--muted);font-size:11px;line-height:1.5;">' + reason + '</div>';
   } else {
-    var hl = n.headlines || [];
+    var hl = (n.headlines || []).filter(function(h){ var s=(h.score===undefined||h.score===null)?0:h.score; return Math.abs(s) >= 1; });   /* Part 2: hide zero-score headlines */
     var hlHTML = '';
     if(hl.length > 0){
       hlHTML = '<div class="soq-rows">' + hl.slice(0,5).map(function(h){
@@ -738,7 +738,7 @@ function renderNewsCard(n){
                '<span class="' + hcls + '">' + hst + '</span></div>';
       }).join('') + '</div>';
     } else {
-      hlHTML = '<div style="color:var(--muted);font-size:10px;margin-top:4px;">' + (reason || 'No recent headlines') + '</div>';
+      hlHTML = '<div style="color:var(--muted);font-size:10px;margin-top:4px;">' + (hl.length === 0 ? 'No significant headlines in current period' : (reason || 'No recent headlines')) + '</div>';
     }
     body =
       '<div class="soq-summary">Sentiment: <span class="' + scls + '">' + sent + '</span>' +

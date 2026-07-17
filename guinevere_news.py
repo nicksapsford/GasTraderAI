@@ -60,22 +60,34 @@ def save_sentiment(sentiment_data):
 CURRENTS_API_KEY = os.getenv('CURRENTS_API_KEY')
 CURRENTS_BASE_URL = 'https://api.currentsapi.services/v1'
 
-# ── Gas-specific keywords (weather + storage drive sharp moves) ─────
+# ── Gas-specific keywords (tightened 17 Jul 2026 -- phrases, not single words) ──
+# Hardcoded DEFAULTS / fallback; live values read from logs/guinevere_keywords.json.
+SYSTEM_NAME = "GasTrader"
 BULLISH_KEYWORDS = [
-    'storage draw', 'cold snap', 'cold weather', 'freeze',
-    'pipeline disruption', 'lng export', 'lng terminal',
-    'hurricane', 'tropical storm', 'supply cut', 'russia gas',
-    'gas shortage', 'heating demand', 'polar vortex',
-    'winter demand', 'production cut'
+    "natural gas", "NatGas", "LNG", "Henry Hub",
+    "gas storage draw", "gas inventory draw",
+    "gas deficit", "below average storage",
+    "cold snap", "winter storm", "polar vortex",
+    "heating demand", "heat wave", "cooling demand",
+    "hot summer", "extreme weather", "gas demand",
+    "LNG export", "LNG terminal", "gas shortage",
+    "Europe gas", "Asia gas demand", "gas supply disruption",
+    "gas pipeline", "gas outage", "EIA gas draw"
 ]
 
 BEARISH_KEYWORDS = [
-    'storage build', 'mild weather', 'warm winter',
-    'record storage', 'lng glut', 'gas glut',
-    'record production', 'shale boom', 'demand falls',
-    'mild temperatures', 'above average storage',
-    'pipeline restored', 'ceasefire'
+    "gas storage build", "gas inventory build",
+    "gas surplus", "above average storage",
+    "mild weather", "warm winter", "cool summer",
+    "below normal temperatures", "LNG glut", "LNG surplus",
+    "gas production surge", "gas oversupply",
+    "EIA gas build", "record gas production"
 ]
+
+KEYWORDS_FILE       = os.path.join(os.path.dirname(__file__), 'logs', 'guinevere_keywords.json')
+KEYWORD_CHANGE_LOG  = os.path.join(os.path.dirname(__file__), 'logs', 'guinevere_keyword_changes.log')
+MACRO_FILE          = os.path.join(os.path.dirname(__file__), '..', 'RoundTableAI', 'logs', 'macro_sentiment.json')
+_kw_cache = {'ts': None, 'bullish': None, 'bearish': None, 'last_updated': None, 'updated_by': None}
 
 # News older than this is ignored
 MAX_NEWS_AGE_HOURS = 4
@@ -91,24 +103,57 @@ _news_cache = {
 CACHE_DURATION_MINUTES = 5
 
 
+def _write_keywords_file(bullish, bearish, updated_by):
+    os.makedirs(os.path.dirname(KEYWORDS_FILE), exist_ok=True)
+    data = {'bullish': list(bullish), 'bearish': list(bearish),
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'updated_by': updated_by}
+    with open(KEYWORDS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2)
+    return data
+
+
+def _load_keywords(force=False):
+    """Active keyword lists from logs/guinevere_keywords.json (5-min cache).
+    Auto-initialises the file from the hardcoded defaults if it is missing."""
+    now = datetime.now(timezone.utc)
+    if (not force and _kw_cache['ts']
+            and (now - _kw_cache['ts']).total_seconds() < 300):
+        return _kw_cache
+    data = None
+    try:
+        with open(KEYWORDS_FILE, encoding='utf-8') as f:
+            d = json.load(f)
+        if isinstance(d.get('bullish'), list) and isinstance(d.get('bearish'), list):
+            data = d
+    except Exception:
+        data = None
+    if data is None:
+        data = _write_keywords_file(BULLISH_KEYWORDS, BEARISH_KEYWORDS, 'defaults')
+    _kw_cache.update(ts=now, bullish=data['bullish'], bearish=data['bearish'],
+                     last_updated=data.get('last_updated'), updated_by=data.get('updated_by'))
+    return _kw_cache
+
+
+def get_keywords():
+    """Public: current keyword lists + metadata (for the dashboard editor)."""
+    kw = _load_keywords(force=True)
+    return {'bullish': list(kw['bullish']), 'bearish': list(kw['bearish']),
+            'last_updated': kw['last_updated'], 'updated_by': kw['updated_by']}
+
+
 def _score_headline(title, description=''):
-    """
-    Score a single headline for gas sentiment.
-    Returns: positive int (bullish), negative (bearish), 0 (neutral)
-    """
+    """Score a headline: +1 per bullish keyword, -1 per bearish (case-insensitive
+    phrase match). Keywords are the live editable set (logs/guinevere_keywords.json)."""
     text = (title + ' ' + (description or '')).lower()
+    kw = _load_keywords()
     score = 0
-
-    for keyword in BULLISH_KEYWORDS:
-        if keyword in text:
+    for keyword in kw['bullish']:
+        if keyword.lower() in text:
             score += 1
-            logger.debug(f"guinevere_news: BULLISH keyword '{keyword}' found")
-
-    for keyword in BEARISH_KEYWORDS:
-        if keyword in text:
+    for keyword in kw['bearish']:
+        if keyword.lower() in text:
             score -= 1
-            logger.debug(f"guinevere_news: BEARISH keyword '{keyword}' found")
-
     return score
 
 

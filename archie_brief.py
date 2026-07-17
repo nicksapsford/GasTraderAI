@@ -53,9 +53,17 @@ def _news_line(appender):
             if isinstance(h, dict):
                 t = (h.get("title") or h.get("headline") or "").strip()
                 k = (h.get("url") or h.get("link") or t).strip().lower()
+                sc_h = h.get("score")
             else:
                 t = str(h).strip()
                 k = t.lower()
+                sc_h = None
+            # Part 2: only surface headlines that moved sentiment (|score| >= 1)
+            try:
+                if abs(float(sc_h)) < 1:
+                    continue
+            except (TypeError, ValueError):
+                continue
             if not k or k in seen:
                 continue
             seen.add(k)
@@ -64,7 +72,7 @@ def _news_line(appender):
             for t in uniq[:3]:
                 appender("  - %s" % t[:100])
         else:
-            appender("  No current headlines")
+            appender("  No significant headlines in current period")
     else:
         appender("News module active -- awaiting sentiment poll")
 
