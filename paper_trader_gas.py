@@ -291,6 +291,10 @@ class PaperTraderGas:
         if gbpusd is not None:
             self._gbpusd = gbpusd
         moved = self.current_trade.update_trailing_stop(price)
+        rung = self.current_trade.apply_profit_ladder(price)   # Profit ladder (Variant 2)
+        if rung:
+            self._log_ladder_step(rung)
+            moved = True
         if moved:
             self._save_state()
         reason = self.current_trade.check_exit(price)
@@ -298,6 +302,29 @@ class PaperTraderGas:
             self.close_trade(price, reason, self._gbpusd)
             return reason
         return None
+
+    def _log_ladder_step(self, rung):
+        """Append a profit-ladder rung trigger to logs/profit_ladder.csv (Variant 2)."""
+        import csv, os
+        from datetime import datetime, timezone
+        t = self.current_trade
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "profit_ladder.csv")
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            new = not os.path.exists(path)
+            with open(path, "a", newline="", encoding="utf-8") as f:
+                w = csv.DictWriter(f, fieldnames=["timestamp_utc", "system", "direction",
+                    "entry_price", "trigger_float_gbp", "floor_gbp", "step_number",
+                    "stop_before", "stop_after"])
+                if new:
+                    w.writeheader()
+                w.writerow({"timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                    "system": "GasTrader", "direction": t.direction, "entry_price": t.entry_price,
+                    "trigger_float_gbp": rung["trigger_float_gbp"], "floor_gbp": rung["floor_gbp"],
+                    "step_number": rung["step"], "stop_before": rung["stop_before"],
+                    "stop_after": rung["stop_after"]})
+        except Exception as exc:
+            log.warning("Could not log ladder step: %s", exc)
 
     def print_status(self) -> None:
         log.info("=" * 60)

@@ -149,6 +149,16 @@ def build_system_brief(state, system_name, asset_label, logs_dir=None, now_utc=N
         pnl = state.get("unrealised_gbp")
         pnl = ct.get("pnl_gbp") if pnl is None else pnl
         a("P&L GBP: %s" % _num(pnl, 2))
+        # Profit Protection Ladder status (Variant 2)
+        try:
+            _lstep = int(float(ct.get("ladder_step") or 0))
+            _lfloor = float(ct.get("ladder_floor_gbp") or 0)
+        except (TypeError, ValueError):
+            _lstep, _lfloor = 0, 0.0
+        if _lstep > 0:
+            a("Ladder: Step %d active -- floor GBP %.2f" % (_lstep, _lfloor))
+        else:
+            a("Ladder: no step triggered yet")
     else:
         a("No open position")
     a("")

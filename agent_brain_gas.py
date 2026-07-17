@@ -163,6 +163,13 @@ def _format_indicators(bar_1d, bar_1h, bar_5m, current_price, liquidity_period,
             f"{current_trade.liquidity_period}"
         )
 
+    if current_trade is not None and getattr(current_trade, "ladder_step", 0):
+        position_text += (
+            " | PROFIT LADDER ACTIVE: floor locked at £%.2f (step %d). Position cannot "
+            "close below this floor unless a gap event occurs -- factor this into your "
+            "HOLD reasoning." % (getattr(current_trade, "ladder_floor_gbp", 0.0),
+                                 int(getattr(current_trade, "ladder_step", 0))))
+
     return f"""Please analyse the current Natural Gas market conditions.
 
 TIME AND PRICE

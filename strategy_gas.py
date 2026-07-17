@@ -134,6 +134,12 @@ def should_force_close(ts_utc: Optional[datetime] = None) -> bool:
 
 # ── Trade record ──────────────────────────────────────────────────────────────
 
+PROFIT_LADDER = [
+    {"trigger_gbp": 5.00,  "floor_gbp": 4.00},
+    {"trigger_gbp": 10.00, "floor_gbp": 8.50},
+]
+
+
 @dataclass
 class GasTrade:
     """
@@ -164,6 +170,51 @@ class GasTrade:
         self.gbpusd_exit  = None
         if self.entry_time is None:
             self.entry_time = datetime.now(timezone.utc)
+
+    def apply_profit_ladder(self, price: float):
+        """Profit Protection Ladder (Variant 2). Tighten the stop to guarantee a
+        minimum GBP floor as floating profit builds -- additive to the trailing stop,
+        only ever tightens, never triggers on a floating loss. The trailing stop and
+        the force close are unaffected (whichever stop is tighter wins). Idempotent,
+        so it re-applies correctly on restart. Returns a dict describing a NEWLY
+        triggered rung (for logging), else None."""
+        if not PROFIT_LADDER or self.stake <= 0:
+            return None
+        if not hasattr(self, "ladder_step"):     # lazy init (also survives reload)
+            self.ladder_step, self.ladder_floor_gbp = 0, 0.0
+        pts = (price - self.entry_price) if self.direction == "LONG" else (self.entry_price - price)
+        float_gbp = pts * self.stake
+        if float_gbp <= 0:                       # never engage on a floating loss
+            return None
+        idx, floor = 0, 0.0
+        for i, s in enumerate(PROFIT_LADDER, start=1):
+            if float_gbp >= s["trigger_gbp"]:
+                idx, floor = i, s["floor_gbp"]
+        if idx == 0:
+            return None
+        new_rung = idx > self.ladder_step
+        if new_rung:
+            self.ladder_step = idx
+            self.ladder_floor_gbp = floor
+        if self.ladder_floor_gbp <= 0:
+            return None
+        floor_pts = self.ladder_floor_gbp / self.stake
+        stop_before = self.stop_loss
+        if self.direction == "LONG":
+            floor_stop = round(self.entry_price + floor_pts, 2)
+            if floor_stop > self.stop_loss:      # tighten only
+                self.stop_loss = floor_stop
+        else:
+            floor_stop = round(self.entry_price - floor_pts, 2)
+            if floor_stop < self.stop_loss:      # tighten only
+                self.stop_loss = floor_stop
+        if new_rung:
+            log.info("  PROFIT LADDER step %d: float GBP %.2f -> floor GBP %.2f | stop %.2f -> %.2f",
+                     idx, float_gbp, self.ladder_floor_gbp, stop_before, self.stop_loss)
+            return {"step": idx, "floor_gbp": self.ladder_floor_gbp,
+                    "trigger_float_gbp": round(float_gbp, 2),
+                    "stop_before": round(stop_before, 2), "stop_after": self.stop_loss}
+        return None
 
     def update_trailing_stop(self, price: float) -> bool:
         """Move the stop in favour of the trade. Returns True if moved."""

@@ -188,6 +188,8 @@ def _serialise_trade(t):
         "exit_price":       t.exit_price,
         "stop_loss":        t.stop_loss,
         "take_profit":      t.take_profit,
+        "ladder_step":      getattr(t, "ladder_step", 0),
+        "ladder_floor_gbp": getattr(t, "ladder_floor_gbp", 0.0),
         "stake":            t.stake,
         "size_oz":          t.size_oz,
         "pnl_usd":          t.pnl_usd,
