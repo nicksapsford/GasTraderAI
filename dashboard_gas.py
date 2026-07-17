@@ -1339,6 +1339,32 @@ def api_update():
         return jsonify({"error": str(exc)}), 500
 
 
+@app.route("/api/lift-confidence", methods=["POST"])
+def api_lift_confidence():
+    """Request a manual Morgan confidence lift (Gaius intervention Step 4). Writes
+    logs/confidence_lift.json; the trading engine applies it in-process on its next
+    cycle -- LIVE, no restart. Optional JSON body {"to": <0-100>} (default 50)."""
+    to = 50.0
+    try:
+        body = request.get_json(force=True, silent=True) or {}
+        if body.get("to") is not None:
+            to = max(0.0, min(100.0, float(body["to"])))
+    except Exception:
+        to = 50.0
+    ts = datetime.now(timezone.utc).isoformat()
+    reason = ("CONFIDENCE LIFT -- Gaius intervention. Manual reset to %g via "
+              "/api/lift-confidence. %s" % (to, ts))
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        (LOG_DIR / "confidence_lift.json").write_text(
+            json.dumps({"confidence": to, "reason": reason, "requested_utc": ts}),
+            encoding="utf-8")
+        return jsonify({"status": "lift_requested", "to": to,
+                        "note": "engine applies on next cycle (live, no restart)"})
+    except Exception as exc:
+        return jsonify({"status": "error", "error": str(exc)}), 500
+
+
 @app.route("/api/health")
 def api_health():
     return jsonify({"status": "ok", "time": datetime.now(timezone.utc).isoformat()})

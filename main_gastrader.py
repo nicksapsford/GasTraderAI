@@ -28,6 +28,7 @@ BASE_DIR           = Path(__file__).resolve().parent
 LOG_DIR            = BASE_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 SHUTDOWN_FLAG      = LOG_DIR / "shutdown.flag"
+LIFT_FLAG          = LOG_DIR / "confidence_lift.json"   # manual Morgan confidence lift (live)
 DASHBOARD_URL      = "http://localhost:5006/api/update"
 
 # ── Env / logging setup ───────────────────────────────────────────────────────
@@ -546,6 +547,30 @@ def _interruptible_sleep(seconds: float) -> None:
         time.sleep(min(1, end - time.monotonic()))
 
 
+def _apply_confidence_lift() -> None:
+    """Apply a pending manual confidence lift (logs/confidence_lift.json) in-process
+    so a Gaius/dashboard lift takes effect LIVE -- Morgan's persisted baseline is
+    otherwise cached in this process until restart. Written by the dashboard
+    /api/lift-confidence endpoint (or Gaius --lift); consumed here via the existing
+    set_confidence() and the flag deleted. Does not change the confidence algorithm."""
+    try:
+        if not LIFT_FLAG.exists():
+            return
+        data = json.loads(LIFT_FLAG.read_text(encoding="utf-8"))
+        val = max(0.0, min(100.0, float(data.get("confidence", 50.0))))
+        reason = data.get("reason") or "CONFIDENCE LIFT -- manual override"
+        prior = performance_gas.get_confidence()
+        set_confidence(val, reason=reason)
+        LIFT_FLAG.unlink(missing_ok=True)
+        log.warning("Morgan CONFIDENCE LIFT applied live: %.1f -> %.1f (%s)", prior, val, reason)
+    except Exception as _exc:
+        log.warning("Confidence lift apply failed: %s", _exc)
+        try:
+            LIFT_FLAG.unlink(missing_ok=True)   # drop a poison flag so it can't loop
+        except Exception:
+            pass
+
+
 def main() -> None:
     log.info("=" * 70)
     log.info("  GasTrader AI v%s", VERSION)
@@ -617,6 +642,9 @@ def main() -> None:
     except Exception as _exc:
         log.warning("Morgan confidence restore failed: %s", _exc)
 
+    # Apply any confidence lift requested while the engine was down (Step 4).
+    _apply_confidence_lift()
+
     import random
     # Stagger Capital.com API calls across systems (shared demo Z6CJSM) to avoid 429s
     STARTUP_DELAY_SECONDS = 60
@@ -633,6 +661,9 @@ def main() -> None:
             if SHUTDOWN_FLAG.exists():
                 log.info("Shutdown requested via dashboard -- stopping (flag left for watchdog)")
                 break
+
+            # Apply a pending manual confidence lift live (Gaius intervention Step 4).
+            _apply_confidence_lift()
 
             # Live dashboard push (all periods, every ~15s)
             if (now - last_dashboard_push) >= DASHBOARD_INTERVAL:
