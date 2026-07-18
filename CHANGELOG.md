@@ -1,3 +1,10 @@
+## [1.2.9] - 2026-07-18
+### Fixed -- Guinevere score now logged to phantom rows (desk-wide sweep)
+- `guinevere_score` is now written to phantom rows at signal time via the cached
+  `fetch_gas_sentiment` -- previously blank on all phantom rows (flagged by the System 5/6 Gaius
+  reviews). Logging-only change (build_snapshot(guinevere_score=...)); no trading-rule
+  change, no backtest. Takes effect on restart. Existing rows stay blank (going-forward fix).
+
 ## [1.2.8] - 2026-07-18
 ### Changed -- phantom verdict threshold (System 5 Review desk-wide, Rec 1 pattern)
 - **`VERDICT_THRESHOLD` 0.06 -> 0.02** ($/MMBtu, 1hr window). Like OilTrader, 0.06 was still

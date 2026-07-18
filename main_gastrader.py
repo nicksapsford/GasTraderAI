@@ -421,10 +421,17 @@ def run_candle_tick(feed, stanley, account, ig) -> None:
         try:
             _dir = proposed_direction if proposed_direction in ("LONG", "SHORT") else ("LONG" if (bar_1d and bar_1d.get("ssl_bull")) else "SHORT")
             try:
+                # Guinevere sentiment score at signal time (desk-wide logging sweep,
+                # 18 Jul 2026): was blank on Gas phantom rows. Cached fetch -- no extra call.
+                try:
+                    _guin_score = guinevere_news.fetch_gas_sentiment().get("score")
+                except Exception:
+                    _guin_score = None
                 _snap = phantom_tracker.build_snapshot(
                     ind_1d, ind_1h, ind_5m,
                     morgan_score=performance_gas.get_confidence(),
                     session=period,
+                    guinevere_score=_guin_score,
                 )
             except Exception as _se:
                 log.warning("phantom indicator snapshot failed: %s", _se)
