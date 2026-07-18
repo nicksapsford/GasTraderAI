@@ -490,22 +490,39 @@ function updateLiquidityCountdown(){
   var el = document.getElementById('countdown');
   if(!el) return;
   var now = new Date();
+  var dow = now.getUTCDay();   /* 0=Sun .. 6=Sat */
   var nowSec = now.getUTCHours()*3600 + now.getUTCMinutes()*60 + now.getUTCSeconds();
-  var boundaries = [
-    {t: 8*3600,  name:'LONDON'},
-    {t: 13*3600, name:'OVERLAP'},
-    {t: 17*3600, name:'NEW YORK'},
-    {t: 22*3600, name:'CLOSED'}
+  /* Weekend closure: Fri 21:00 UTC -> Sun 22:00 UTC (mirrors data_feed is_market_open). */
+  var weekendClosed = (dow === 6) || (dow === 5 && nowSec >= 21*3600) || (dow === 0 && nowSec < 22*3600);
+  if(weekendClosed){
+    el.textContent = 'CLOSED -- market reopens Sun 22:00 UTC';
+    el.className = 'countdown';
+    return;
+  }
+  /* Snag 17 fix: session-aware countdown. Boundaries mirror data_feed_gas
+     get_liquidity_period EXACTLY (each .start = UTC second the period begins), so the
+     dashboard never disagrees with the traded session and shows the CURRENT open
+     session rather than reading as if the market were shut. NY opens 17:00 UTC. */
+  var sched = [
+    {start: 8*3600,        name:'LONDON'},
+    {start: 13*3600,       name:'OVERLAP'},
+    {start: 17*3600,       name:'NEW YORK'},
+    {start: 20*3600 + 1800,name:'CLOSING'},   /* 20:30 */
+    {start: 21*3600,       name:'CLOSED'},     /* 21:00-22:00 daily break */
+    {start: 22*3600,       name:'ASIAN'}       /* reopen; runs to 08:00 next day */
   ];
-  var next = null;
-  for(var i=0;i<boundaries.length;i++){ if(boundaries[i].t > nowSec){ next = boundaries[i]; break; } }
-  if(!next){ next = {t: 24*3600, name:'ASIAN'}; }   // after 22:00 -> Asia open 00:00 tomorrow
-  var rem = next.t - nowSec;
+  var cur = 'ASIAN';   /* 22:00 prev day -> 08:00 = overnight Asia */
+  for(var i=0;i<sched.length;i++){ if(nowSec >= sched[i].start){ cur = sched[i].name; } }
+  var nextName = 'LONDON';
+  var nextStart = 24*3600 + 8*3600;   /* default: LONDON 08:00 tomorrow */
+  for(var j=0;j<sched.length;j++){ if(sched[j].start > nowSec){ nextName = sched[j].name; nextStart = sched[j].start; break; } }
+  var rem = nextStart - nowSec;
   var h = Math.floor(rem/3600);
   var m = Math.floor((rem%3600)/60);
   var s = rem%60;
   var txt = (h>0 ? h + ':' + String(m).padStart(2,'0') : String(m)) + ':' + String(s).padStart(2,'0');
-  el.textContent = next.name + ' in ' + txt;
+  var openTag = (cur === 'CLOSED') ? '' : ' (open)';
+  el.textContent = cur + openTag + ' -- ' + nextName + ' in ' + txt;
   el.className = 'countdown' + (rem <= 60 ? ' green' : rem <= 300 ? ' amber' : '');
 }
 setInterval(updateLiquidityCountdown, 1000);

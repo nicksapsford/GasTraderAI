@@ -1,3 +1,12 @@
+## [1.3.3] - 2026-07-18
+### Fixed -- Snag 17: session-aware liquidity countdown
+- The dashboard countdown now shows the CURRENT open session and counts down to the
+  next boundary (e.g. "OVERLAP (open) -- NEW YORK in 3:49:00") instead of only naming
+  the next session, which read as if the market were shut (same root cause as USTrader
+  Snag 13). Boundaries now mirror `data_feed_gas.get_liquidity_period` EXACTLY --
+  added CLOSING (20:30), the 21:00-22:00 daily break, the 22:00 ASIAN reopen, and a
+  Fri 21:00->Sun 22:00 weekend-closed state. NY session opens 17:00 UTC (OVERLAP 13:00-17:00).
+
 ## [1.3.2] - 2026-07-18
 ### Added -- Macro Sentiment Overlay reader (Guinevere Part 4)
 - **`get_macro()` / `get_macro_adjustment()` / `get_macro_context()`** in `guinevere_news.py`:
