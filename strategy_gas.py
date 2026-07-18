@@ -33,9 +33,14 @@ log = logging.getLogger("GasTrader.Strategy")
 # recalibrated 16 Jul 2026 (Nick & Archie sign-off) from a 60-day NG=F backtest to
 # NatGas's real ~$2.89 scale. The EIA Gas Storage window (Thu 14:15-15:00 UTC) is a
 # hard block, so the stop need not absorb EIA spikes.
-TRAILING_STOP_POINTS   = 0.15    # trailing stop, $0.15/MMBtu (~1.2x median daily range)
-TAKE_PROFIT_POINTS     = 0.75    # 5:1 safety ceiling (trailing stop exits first in practice)
-MAX_RISK_PER_TRADE_GBP = 20.0    # max GBP loss per trade (2% of £1,000)
+# System 6 Review -- DATA COLLECTION MODE (18 Jul 2026). NatGas at ~$2.88 is too
+# low-volatility for profitable fixed-pip trading (median 30-min move 0.005pt; p90 1hr
+# favourable move only 0.030pt). Whipsaw backtest (NG=F 60d 5m): 0.05pt stop = 1.8%
+# whipsaw. So stop 0.05 / target 0.08 (best achievable ~1.6:1 R:R -- data collection,
+# not profit) and MAX_RISK cut to £5 (stake = £5/0.05 = £100/pt). Review when NatGas >$4/MMBtu.
+TRAILING_STOP_POINTS   = 0.05    # trailing stop, $0.05/MMBtu (~10x the 0.005 median 30-min noise)
+TAKE_PROFIT_POINTS     = 0.08    # best-achievable target given NatGas vol (above p90 0.030); 1.6:1 R:R
+MAX_RISK_PER_TRADE_GBP = 5.0     # reduced for data-collection mode (was £20) -> stake £100/pt at 0.05 stop
 SPREAD_POINTS          = 0.005   # Capital.com NatGas spread ($/MMBtu), confirmed demo 16 Jul 2026
 DEFAULT_GBPUSD         = 1.27    # conservative fallback if live rate unavailable
 
@@ -134,9 +139,12 @@ def should_force_close(ts_utc: Optional[datetime] = None) -> bool:
 
 # ── Trade record ──────────────────────────────────────────────────────────────
 
+# Recalibrated for £5 MAX_RISK / 0.05pt stop / 0.08pt target (System 6 Review, data
+# collection). Max potential profit ~£8/trade, so steps are small: Step2 £6 locks near-
+# full profit as the 0.08pt (~£8) target is approached.
 PROFIT_LADDER = [
-    {"trigger_gbp": 5.00,  "floor_gbp": 4.00},
-    {"trigger_gbp": 10.00, "floor_gbp": 8.50},
+    {"trigger_gbp": 3.00, "floor_gbp": 2.50},
+    {"trigger_gbp": 6.00, "floor_gbp": 5.00},
 ]
 
 

@@ -1,3 +1,27 @@
+## [1.3.0] - 2026-07-18
+### Changed -- GasTrader System 6 Review: DATA COLLECTION MODE
+Provisional; review when NatGas > $4/MMBtu. Nick sign-off. NatGas at ~$2.88 is too
+low-volatility for profitable fixed-pip trading (median 1hr favourable move 0.008pt, p90
+0.030pt) -- the system keeps running to accumulate phantom data and let Morgan learn.
+
+- **MAX_RISK £20 -> £5 (Change 1)** -- data-collection risk cap; stake = £5/0.05 = £100/pt (was £133).
+- **Risk (Change 2):** `TRAILING_STOP_POINTS` 0.15 -> **0.05** (NG=F 60d 5m backtest: 1.8%% whipsaw;
+  0.15 was 6.8x the average move, never hit), `TAKE_PROFIT_POINTS` 0.75 -> **0.08** (best achievable,
+  above the p90 favourable 0.030; 1.6:1 R:R). Spread 0.005 unchanged.
+- **Oversold-entry veto (Change 3) -- HIGHEST LEVERAGE:** new Lancelot `check_rsi_timing` --
+  SHORT blocked when daily OR 1h RSI < 35 (bounce), LONG blocked when daily OR 1h RSI > 65. All 7
+  live losses were SHORTs into oversold bounces; this addresses the direct cause.
+- **Bidirectional (Change 4):** direction from daily SSL + Morgan gates -- BULL + Morgan >= 50 -> LONG;
+  BEAR + Morgan SHORT >= 65 -> SHORT; else STAY OUT (data-collection default). New separate Morgan
+  SHORT confidence (`performance_gas.get/set_short_confidence`, init **30**).
+- **Guinevere keywords (Change 5):** restored 6 over-tightened gas-supply BULLISH keywords
+  (European gas price/shortage, Qatar LNG, LNG supply disruption/shortage, gas price surge) that
+  had wrongly scored 0. logs/ (gitignored); takes effect on the 5-min keyword cache refresh.
+- **Profit ladder (Change 6):** recalibrated to **£3->£2.50, £6->£5.00**.
+- **Arthur prompt (Change 7):** rewritten for data-collection mode (8 elements incl. the oversold
+  veto + EIA Thursday awareness). `get_trading_decision` gained `morgan_short` + `proposed_direction`.
+- Gaius standing-monitoring instruction added for NatGas > $4 recalibration trigger (GaiusAI gaius_tor.md).
+
 ## [1.2.9] - 2026-07-18
 ### Fixed -- Guinevere score now logged to phantom rows (desk-wide sweep)
 - `guinevere_score` is now written to phantom rows at signal time via the cached

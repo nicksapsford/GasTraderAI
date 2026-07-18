@@ -31,6 +31,41 @@ _MORGAN_STATE_PATH = os.path.join(os.path.dirname(__file__), 'logs', 'morgan_con
 _morgan_lock = threading.Lock()
 _morgan_confidence = None
 
+# Morgan SHORT confidence (System 6 Review, Change 4) -- a SEPARATE confidence a SHORT
+# must clear (>= 65) before it can execute. GasTrader has no clean SHORT-win history, so
+# this starts at 30 and builds only with SHORT phantom evidence. Mirrors Oil/FTSE/Crypto.
+_MORGAN_SHORT_STATE_PATH = os.path.join(os.path.dirname(__file__), 'logs', 'morgan_short_confidence.json')
+_MORGAN_SHORT_INIT = 30.0
+_morgan_short_confidence = None
+
+
+def get_short_confidence():
+    """Return the persisted Morgan SHORT confidence (float), defaulting to 30."""
+    global _morgan_short_confidence
+    with _morgan_lock:
+        if _morgan_short_confidence is None:
+            try:
+                with open(_MORGAN_SHORT_STATE_PATH) as f:
+                    _morgan_short_confidence = float(json.load(f).get('confidence', _MORGAN_SHORT_INIT))
+            except Exception:
+                _morgan_short_confidence = _MORGAN_SHORT_INIT
+        return _morgan_short_confidence
+
+
+def set_short_confidence(value, reason='update'):
+    """Persist a new Morgan SHORT confidence (clamped 0-100)."""
+    global _morgan_short_confidence
+    with _morgan_lock:
+        _morgan_short_confidence = max(0.0, min(100.0, float(value)))
+        try:
+            os.makedirs(os.path.dirname(_MORGAN_SHORT_STATE_PATH), exist_ok=True)
+            with open(_MORGAN_SHORT_STATE_PATH, 'w') as f:
+                json.dump({'confidence': _morgan_short_confidence}, f)
+        except Exception as e:
+            log.warning("Morgan SHORT: could not persist confidence: %s", e)
+        log.info("Morgan SHORT: confidence set to %.1f (%s)", _morgan_short_confidence, reason)
+        return _morgan_short_confidence
+
 # ── Morgan confidence CSV audit trail ─────────────────────────────────────────
 CONFIDENCE_LOG = os.path.join(os.path.dirname(__file__), 'logs', 'morgan_confidence.csv')
 CONFIDENCE_FIELDNAMES = ['timestamp', 'confidence', 'level', 'reason']

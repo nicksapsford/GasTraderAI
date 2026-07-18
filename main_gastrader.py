@@ -14,7 +14,14 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pandas as pd
 from dotenv import load_dotenv
+
+# Bidirectional gates (System 6 Review, Change 4). SHORTs need a separate Morgan SHORT
+# confidence >= 65 (starts 30 -- no clean short history). LONGs (bounce trades in the
+# downtrend) need the general Morgan >= 50. Otherwise STAY OUT (data-collection default).
+MORGAN_SHORT_MIN = 65
+MORGAN_LONG_MIN  = 50
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -346,7 +353,38 @@ def run_candle_tick(feed, stanley, account, ig) -> None:
     sig_1h = feed.composite_signal("1h")
     sig_5m = feed.composite_signal("5m")
     trend_1d = "LONG" if (bar_1d is not None and bar_1d.get("ssl_bull")) else "SHORT"
-    proposed_direction = sig_1h if sig_1h in ("LONG", "SHORT") else "BOTH"
+
+    # ── Bidirectional regime direction (System 6 Review, Change 4) ──────────────
+    # DATA COLLECTION MODE: default to STAY OUT unless the regime + Morgan gates open.
+    #   daily BULL  AND Morgan (general) >= 50  -> LONG (bounce trades)
+    #   daily BEAR  AND Morgan SHORT     >= 65  -> SHORT (downtrend; RSI-timing veto in Lancelot)
+    #   otherwise -> STAY OUT. (Currently BEAR + Morgan SHORT ~30 -> mostly STAY OUT: correct.)
+    _morgan = get_perf_dashboard_dict().get("confidence_score")
+    _morgan = 50.0 if _morgan is None else float(_morgan)
+    _morgan_short = performance_gas.get_short_confidence()
+    _ssl_1d = bar_1d.get("ssl_bull") if bar_1d is not None else None
+    if _ssl_1d is None or (isinstance(_ssl_1d, float) and pd.isna(_ssl_1d)):
+        proposed_direction, _stay_reason = "BOTH", None                 # neutral daily -> defer to Lancelot/Arthur
+    elif bool(_ssl_1d):
+        if _morgan >= MORGAN_LONG_MIN:
+            proposed_direction, _stay_reason = "LONG", None
+        else:
+            proposed_direction, _stay_reason = None, (
+                "STAY OUT -- daily BULL but Morgan %.1f below %d." % (_morgan, MORGAN_LONG_MIN))
+    else:
+        if _morgan_short >= MORGAN_SHORT_MIN:
+            proposed_direction, _stay_reason = "SHORT", None
+        else:
+            proposed_direction, _stay_reason = None, (
+                "STAY OUT -- daily BEAR but Morgan SHORT %.1f below %d. SHORTs blocked "
+                "until evidence builds (data-collection mode)." % (_morgan_short, MORGAN_SHORT_MIN))
+
+    if proposed_direction is None:
+        log.info(_stay_reason)
+        _push_dashboard(stanley, account, ig, price, gbpusd, period,
+                        calendar_summary=cal_summary, connector_status=connector_status,
+                        trend_1d=trend_1d, trend_1h=sig_1h, signal_5m=sig_5m)
+        return
 
     ind_1d = _indicator_snapshot(bar_1d)
     ind_1h = _indicator_snapshot(bar_1h)
@@ -385,6 +423,7 @@ def run_candle_tick(feed, stanley, account, ig) -> None:
         bar_1h=bar_1h, bar_5m=bar_5m, current_price=price, liquidity_period=period,
         bar_1d=bar_1d, current_trade=stanley.current_trade,
         calendar_context=cal_context, perf_context=perf_context, gbpusd_rate=gbpusd,
+        morgan_short=_morgan_short, proposed_direction=proposed_direction,
     )
 
     # Guinevere news -> Arthur confidence adjustment (soft, additive; never blocks).

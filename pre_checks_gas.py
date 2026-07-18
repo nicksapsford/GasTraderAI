@@ -28,6 +28,12 @@ RSI_LONG_NORMAL   = 55
 RSI_SHORT_NORMAL  = 45
 RSI_LONG_ASIAN    = 60    # tighter filter for thin Asian markets
 RSI_SHORT_ASIAN   = 40
+# Oversold/overbought entry veto (System 6 Review, Change 3). All 7 live losses were
+# SHORTs entered while RSI was deeply oversold (daily ~31, 5m 23-30) -- straight into a
+# bounce. Block SHORT when daily OR 1h RSI < 35 (bounce imminent), LONG when daily OR 1h
+# RSI > 65 (overbought). Highest-leverage fix -- it addresses the direct cause of losses.
+RSI_TIMING_OVERSOLD   = 35
+RSI_TIMING_OVERBOUGHT = 65
 
 CHOPPY_RSI_THRESHOLD    = 5.0
 CHOPPY_TMO_THRESHOLD    = 0.5
@@ -239,6 +245,36 @@ def check_1h_rsi_confirms(bar_1h: pd.Series, direction: str, is_asian: bool = Fa
     return _pass()
 
 
+def check_rsi_timing(bar_1d: Optional[pd.Series], bar_1h: pd.Series, direction: str) -> dict:
+    """Oversold/overbought entry veto (System 6 Review, Change 3).
+    SHORT: FAIL if daily RSI < 35 OR 1h RSI < 35 (shorting into an imminent bounce).
+    LONG:  FAIL if daily RSI > 65 OR 1h RSI > 65 (buying into an overbought top).
+    Missing values pass (do not block on absent data)."""
+    rsi_1d = bar_1d.get("rsi") if bar_1d is not None else None
+    rsi_1h = bar_1h.get("rsi")
+    if direction == "SHORT":
+        d_bad = rsi_1d is not None and pd.notna(rsi_1d) and rsi_1d < RSI_TIMING_OVERSOLD
+        h_bad = pd.notna(rsi_1h) and rsi_1h < RSI_TIMING_OVERSOLD
+        if d_bad or h_bad:
+            return _fail(
+                "RSI Timing veto -- SHORT blocked, RSI oversold (daily: %s, 1hr: %s). "
+                "Wait for RSI > 40." % (
+                    "N/A" if rsi_1d is None or pd.isna(rsi_1d) else "%.1f" % rsi_1d,
+                    "N/A" if pd.isna(rsi_1h) else "%.1f" % rsi_1h),
+                block_direction="SHORT")
+    elif direction == "LONG":
+        d_bad = rsi_1d is not None and pd.notna(rsi_1d) and rsi_1d > RSI_TIMING_OVERBOUGHT
+        h_bad = pd.notna(rsi_1h) and rsi_1h > RSI_TIMING_OVERBOUGHT
+        if d_bad or h_bad:
+            return _fail(
+                "RSI Timing veto -- LONG blocked, RSI overbought (daily: %s, 1hr: %s). "
+                "Wait for RSI < 60." % (
+                    "N/A" if rsi_1d is None or pd.isna(rsi_1d) else "%.1f" % rsi_1d,
+                    "N/A" if pd.isna(rsi_1h) else "%.1f" % rsi_1h),
+                block_direction="LONG")
+    return _pass()
+
+
 def check_5m_tmo_momentum(bar_1h: pd.Series, bar_5m: pd.Series) -> dict:
     """5m TMO must show momentum: > +0.3 for LONG, < -0.3 for SHORT."""
     ssl_bull = bar_1h.get("ssl_bull")
@@ -342,6 +378,7 @@ def run_all_pre_checks(
             ("Daily trend filter", lambda: check_daily_trend_filter(bar_1d, direction)),
             ("1h SSL agreement",   lambda: check_ssl_agreement(bar_1h, direction)),
             ("1h RSI confirming",  lambda: check_1h_rsi_confirms(bar_1h, direction, is_asian)),
+            ("RSI Timing OK",      lambda: check_rsi_timing(bar_1d, bar_1h, direction)),
             ("5m TMO momentum",    lambda: check_5m_tmo_momentum(bar_1h, bar_5m)),
             ("Not choppy",         lambda: check_choppy_market(bar_1h, bar_5m)),
             ("Candle confirmed",   lambda: check_candle_confirmed(bar_1h, bar_5m)),
@@ -382,11 +419,12 @@ def run_individual_pre_checks(
         checks["Daily Trend OK"]    = check_daily_trend_filter(bar_1d, direction)["passed"]
         checks["1h SSL Aligned"]    = check_ssl_agreement(bar_1h, direction)["passed"]
         checks["1h RSI Confirming"] = check_1h_rsi_confirms(bar_1h, direction, is_asian)["passed"]
+        checks["RSI Timing OK"]     = check_rsi_timing(bar_1d, bar_1h, direction)["passed"]
         checks["Momentum Strong"]   = check_5m_tmo_momentum(bar_1h, bar_5m)["passed"]
         checks["Not Choppy"]        = check_choppy_market(bar_1h, bar_5m)["passed"]
         checks["Candle Confirmed"]  = check_candle_confirmed(bar_1h, bar_5m)["passed"]
     else:
-        for k in ["Daily Trend OK", "1h SSL Aligned", "1h RSI Confirming",
+        for k in ["Daily Trend OK", "1h SSL Aligned", "1h RSI Confirming", "RSI Timing OK",
                   "Momentum Strong", "Not Choppy", "Candle Confirmed"]:
             checks[k] = None
     return checks
