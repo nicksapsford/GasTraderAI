@@ -141,6 +141,52 @@ def get_keywords():
     return {'bullish': list(kw['bullish']), 'bearish': list(kw['bearish']),
             'last_updated': kw['last_updated'], 'updated_by': kw['updated_by']}
 
+def _log_keyword_change(action, keyword, kind, by):
+    """Append a keyword add/remove to logs/guinevere_keyword_changes.log (Part 3)."""
+    try:
+        os.makedirs(os.path.dirname(KEYWORD_CHANGE_LOG), exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        with open(KEYWORD_CHANGE_LOG, 'a', encoding='utf-8') as f:
+            f.write('[%s] %s "%s" (%s) by %s\n' % (ts, action, keyword, kind.upper(), by))
+    except Exception as e:
+        logger.warning("Guinevere: could not log keyword change: %s", e)
+
+
+def save_keywords(bullish, bearish, updated_by='Nick'):
+    """Persist a new keyword set from the dashboard editor (Part 3, live -- Guinevere
+    re-reads every 5 min, no restart). Dedupes/strips, logs each add/remove vs the
+    current set, writes logs/guinevere_keywords.json, and refreshes the cache.
+    Returns the updated {bullish, bearish, last_updated, updated_by}."""
+    def _clean(lst):
+        seen, out = set(), []
+        for k in (lst or []):
+            k = str(k).strip()
+            if k and k.lower() not in seen:
+                seen.add(k.lower()); out.append(k)
+        return out
+    new_bull, new_bear = _clean(bullish), _clean(bearish)
+    cur = _load_keywords(force=True)
+    old_bull_l = {k.lower() for k in cur['bullish']}
+    old_bear_l = {k.lower() for k in cur['bearish']}
+    new_bull_l = {k.lower() for k in new_bull}
+    new_bear_l = {k.lower() for k in new_bear}
+    for k in new_bull:
+        if k.lower() not in old_bull_l:
+            _log_keyword_change('ADDED', k, 'BULLISH', updated_by)
+    for k in cur['bullish']:
+        if k.lower() not in new_bull_l:
+            _log_keyword_change('REMOVED', k, 'BULLISH', updated_by)
+    for k in new_bear:
+        if k.lower() not in old_bear_l:
+            _log_keyword_change('ADDED', k, 'BEARISH', updated_by)
+    for k in cur['bearish']:
+        if k.lower() not in new_bear_l:
+            _log_keyword_change('REMOVED', k, 'BEARISH', updated_by)
+    data = _write_keywords_file(new_bull, new_bear, updated_by)
+    _load_keywords(force=True)   # refresh the 5-min cache immediately
+    return {'bullish': data['bullish'], 'bearish': data['bearish'],
+            'last_updated': data['last_updated'], 'updated_by': data['updated_by']}
+
 
 def _score_headline(title, description=''):
     """Score a headline: +1 per bullish keyword, -1 per bearish (case-insensitive

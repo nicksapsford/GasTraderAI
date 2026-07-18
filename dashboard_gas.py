@@ -1156,6 +1156,107 @@ setInterval(pollNews, 60000);
   else { inject(); }
 })();
 </script>
+<!-- GUINEVERE KEYWORD EDITOR (Part 3) -->
+<script>
+(function(){
+  var kw = {bullish:[], bearish:[], last_updated:'', updated_by:''};
+  var loaded = false;
+  var node = null;
+  function esc(s){ s = String(s); s = s.split('&').join('&amp;'); s = s.split('<').join('&lt;'); s = s.split('>').join('&gt;'); s = s.split('"').join('&quot;'); return s; }
+  function pills(list, kind){
+    if(!list || !list.length){ return '<span class="kw-empty">none</span>'; }
+    return list.map(function(k,i){
+      var fn = kind === 'bull' ? 'kwRemoveBull(' : 'kwRemoveBear(';
+      return '<span class="kw-pill kw-' + kind + '">' + esc(k) +
+             '<span class="kw-x" onclick="' + fn + i + ')" title="remove">&times;</span></span>';
+    }).join('');
+  }
+  function renderInner(){
+    if(!node){ return; }
+    var upd = 'Keywords last updated: ' + (kw.last_updated ? esc(kw.last_updated) : '--') +
+              (kw.updated_by ? ' by ' + esc(kw.updated_by) : '');
+    node.innerHTML =
+      '<div class="card-title gas">GUINEVERE KEYWORDS</div>' +
+      '<div class="kw-sec"><div class="kw-lbl kw-bull-lbl">BULLISH</div>' +
+        '<div class="kw-pills">' + pills(kw.bullish, 'bull') + '</div>' +
+        '<div class="kw-add"><input id="kwBullInput" class="kw-input" type="text" placeholder="add bullish keyword" />' +
+          '<button class="kw-btn" type="button" onclick="kwAddBull()">Add Bullish</button></div>' +
+      '</div>' +
+      '<div class="kw-sec"><div class="kw-lbl kw-bear-lbl">BEARISH</div>' +
+        '<div class="kw-pills">' + pills(kw.bearish, 'bear') + '</div>' +
+        '<div class="kw-add"><input id="kwBearInput" class="kw-input" type="text" placeholder="add bearish keyword" />' +
+          '<button class="kw-btn" type="button" onclick="kwAddBear()">Add Bearish</button></div>' +
+      '</div>' +
+      '<div class="kw-foot"><button class="kw-save" id="kwSaveBtn" type="button" onclick="kwSave()">Save</button>' +
+        '<span class="kw-updated" id="kwUpdated">' + upd + '</span></div>';
+  }
+  function ensureNode(){
+    if(!node){
+      node = document.createElement('div');
+      node.className = 'card';
+      node.id = 'kwCard';
+      node.style.flexShrink = '0';
+      renderInner();
+    }
+    return node;
+  }
+  function mount(){
+    var nc = document.getElementById('newsCard');
+    if(!nc || !nc.parentNode){ return; }
+    ensureNode();
+    if(nc.nextSibling !== node){ nc.parentNode.insertBefore(node, nc.nextSibling); }
+  }
+  window.kwAddBull = function(){
+    var el = document.getElementById('kwBullInput'); if(!el){ return; }
+    var v = (el.value || '').trim(); if(!v){ return; }
+    if(kw.bullish.map(function(x){return x.toLowerCase();}).indexOf(v.toLowerCase()) < 0){ kw.bullish.push(v); }
+    el.value = ''; renderInner();
+  };
+  window.kwAddBear = function(){
+    var el = document.getElementById('kwBearInput'); if(!el){ return; }
+    var v = (el.value || '').trim(); if(!v){ return; }
+    if(kw.bearish.map(function(x){return x.toLowerCase();}).indexOf(v.toLowerCase()) < 0){ kw.bearish.push(v); }
+    el.value = ''; renderInner();
+  };
+  window.kwRemoveBull = function(i){ kw.bullish.splice(i,1); renderInner(); };
+  window.kwRemoveBear = function(i){ kw.bearish.splice(i,1); renderInner(); };
+  window.kwSave = function(){
+    var btn = document.getElementById('kwSaveBtn'); if(btn){ btn.textContent = 'Saving...'; btn.disabled = true; }
+    fetch('/api/keywords', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({bullish:kw.bullish, bearish:kw.bearish, by:'Nick'})})
+      .then(function(r){ return r.json(); })
+      .then(function(res){
+        if(res && res.bullish){ kw.bullish = res.bullish; kw.bearish = res.bearish;
+          kw.last_updated = res.last_updated || ''; kw.updated_by = res.updated_by || ''; }
+        renderInner();
+        var b = document.getElementById('kwSaveBtn');
+        if(b){ b.textContent = 'Saved'; b.disabled = false;
+          setTimeout(function(){ var b2=document.getElementById('kwSaveBtn'); if(b2){ b2.textContent='Save'; } }, 1800); }
+      })
+      .catch(function(){
+        var b = document.getElementById('kwSaveBtn');
+        if(b){ b.textContent = 'Error'; b.disabled = false;
+          setTimeout(function(){ var b2=document.getElementById('kwSaveBtn'); if(b2){ b2.textContent='Save'; } }, 1800); }
+      });
+  };
+  function fetchKw(){
+    fetch('/api/keywords').then(function(r){ return r.json(); }).then(function(res){
+      if(res){ kw.bullish = res.bullish || []; kw.bearish = res.bearish || [];
+        kw.last_updated = res.last_updated || ''; kw.updated_by = res.updated_by || ''; }
+      loaded = true; renderInner(); mount();
+    }).catch(function(){ loaded = true; renderInner(); mount(); });
+  }
+  var _origRP1 = window.renderPage1;
+  if(typeof _origRP1 === 'function'){
+    window.renderPage1 = function(d){ _origRP1(d); mount(); };
+  }
+  var st = document.createElement('style');
+  st.textContent = '#kwCard .kw-sec{margin-top:8px;}#kwCard .kw-lbl{font-size:10px;letter-spacing:0.5px;font-weight:bold;margin-bottom:4px;}#kwCard .kw-bull-lbl{color:#2ecc71;}#kwCard .kw-bear-lbl{color:#e74c3c;}#kwCard .kw-pills{display:flex;flex-wrap:wrap;gap:4px;}#kwCard .kw-pill{display:inline-flex;align-items:center;gap:4px;font-size:10px;padding:2px 6px;border-radius:10px;border:1px solid;}#kwCard .kw-bull{color:#2ecc71;border-color:rgba(46,204,113,0.5);background:rgba(46,204,113,0.10);}#kwCard .kw-bear{color:#e74c3c;border-color:rgba(231,76,60,0.5);background:rgba(231,76,60,0.10);}#kwCard .kw-x{cursor:pointer;font-weight:bold;opacity:0.7;}#kwCard .kw-x:hover{opacity:1;}#kwCard .kw-empty{color:var(--muted);font-size:10px;}#kwCard .kw-add{display:flex;gap:4px;margin-top:5px;}#kwCard .kw-input{flex:1;min-width:0;background:#1a1a1a;border:1px solid #333;color:#eee;font-size:10px;padding:3px 6px;border-radius:3px;}#kwCard .kw-btn{background:rgba(34,139,34,0.12);border:1px solid #228B22;color:#228B22;font-size:9px;padding:3px 7px;border-radius:3px;cursor:pointer;white-space:nowrap;text-transform:uppercase;letter-spacing:0.3px;}#kwCard .kw-btn:hover{background:rgba(34,139,34,0.28);}#kwCard .kw-foot{display:flex;align-items:center;gap:10px;margin-top:9px;}#kwCard .kw-save{background:rgba(46,204,113,0.15);border:1px solid #2ecc71;color:#2ecc71;font-size:10px;padding:4px 14px;border-radius:3px;cursor:pointer;text-transform:uppercase;letter-spacing:0.5px;}#kwCard .kw-save:hover{background:rgba(46,204,113,0.30);}#kwCard .kw-updated{color:var(--muted);font-size:9px;}';
+  function boot(){ document.head.appendChild(st); fetchKw(); setInterval(mount, 2000); }
+  if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', boot); }
+  else { boot(); }
+})();
+</script>
 </body>
 </html>"""
 
@@ -1326,6 +1427,29 @@ def api_state():
     }
     resp.update(_compute_flat_fields(s))
     return jsonify(resp)
+
+
+@app.route("/api/keywords", methods=["GET", "POST"])
+def api_keywords():
+    """Guinevere keyword editor (Part 3). GET returns the current bullish/bearish
+    lists + metadata; POST {bullish:[...], bearish:[...], by:"Nick"} saves them LIVE
+    (Guinevere re-reads logs/guinevere_keywords.json every 5 min, no restart) and logs
+    each add/remove to logs/guinevere_keyword_changes.log."""
+    if request.method == "GET":
+        try:
+            return jsonify(guinevere_news.get_keywords())
+        except Exception as exc:
+            return jsonify({"bullish": [], "bearish": [], "last_updated": "--",
+                            "updated_by": "", "error": str(exc)}), 500
+    try:
+        body = request.get_json(force=True, silent=True) or {}
+        bullish = body.get("bullish") or []
+        bearish = body.get("bearish") or []
+        by = (str(body.get("by") or "Nick").strip()) or "Nick"
+        result = guinevere_news.save_keywords(bullish, bearish, updated_by=by)
+        return jsonify(result)
+    except Exception as exc:
+        return jsonify({"status": "error", "error": str(exc)}), 500
 
 
 @app.route("/api/update", methods=["POST"])

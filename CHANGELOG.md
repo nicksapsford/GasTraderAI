@@ -1,3 +1,16 @@
+## [1.3.1] - 2026-07-18
+### Added -- Guinevere live keyword editor (Guinevere Part 3)
+- **Dashboard keyword editor** below the Guinevere news panel: BULLISH / BEARISH
+  sections with removable pills, per-section add inputs, and a Save button. Edits
+  apply LIVE -- Guinevere re-reads `logs/guinevere_keywords.json` every 5 min, no restart.
+- **New `/api/keywords` route** (GET current lists, POST to save) in `dashboard_gas.py`.
+- **`save_keywords()` + `_log_keyword_change()`** in `guinevere_news.py`: dedupes/strips,
+  writes the keywords file, refreshes the 5-min cache immediately, and logs every
+  add/remove to `logs/guinevere_keyword_changes.log`
+  (`[ISO8601Z] ADDED/REMOVED "kw" (BULLISH|BEARISH) by Nick`).
+- "Keywords last updated" indicator shows the last save timestamp (UTC). Data-only
+  files (`logs/`, gitignored); no trading-rule change, no backtest required.
+
 ## [1.3.0] - 2026-07-18
 ### Changed -- GasTrader System 6 Review: DATA COLLECTION MODE
 Provisional; review when NatGas > $4/MMBtu. Nick sign-off. NatGas at ~$2.88 is too
