@@ -70,14 +70,14 @@ INDICATOR_COLUMNS = [
 
 FIELDNAMES = _BASE_FIELDS + INDICATOR_COLUMNS
 
-# Verdict thresholds (points).
-# NatGas-calibrated (16 Jul 2026, Nick & Archie sign-off): 0.06 points = $0.06/MMBtu,
-# 40% of the recalibrated 0.15-point stop (mirrors OilTrader's 2 = 40% of 5). The old
-# 10-point ($10/MMBtu) threshold -- inherited from a larger-instrument scale -- made
-# every signal NEUTRAL on a ~$2.89 instrument. 1 point = $1/MMBtu. Applies to NEW
-# verdicts only (PENDING rows resolving from now on + future rows); existing rows were
-# recorded under the old threshold and are NOT changed.
-VERDICT_THRESHOLD = 0.06  # $0.06/MMBtu -- moves under $0.06 = noise (NEUTRAL), over = CORRECT/WRONG
+# Verdict thresholds (points, $/MMBtu) -- classified on the 1hr post-decision window.
+# System 5 Review desk-wide (18 Jul 2026): lowered 0.06 -> 0.02. Like OilTrader, 0.06 was
+# still too coarse for NatGas's tiny hourly range (median |1hr move| ~0.02, max ~0.04) --
+# 0%% of windows reached 0.06 so every verdict stayed NEUTRAL. 0.02 (~median hourly move,
+# ~0.7%% of a ~$2.89 instrument, matching OilTrader's 0.5/$84 scale) restores a learning
+# signal. All existing rows retrospectively re-scored to 0.02 on 18 Jul (small sample --
+# only 5 rows had 1hr data). 1 point = $1/MMBtu.
+VERDICT_THRESHOLD = 0.02  # $0.02/MMBtu on the 1hr window -- under = noise (NEUTRAL), over = CORRECT/WRONG
 
 
 # ─── Indicator snapshot helpers ──────────────────────────────────────────────

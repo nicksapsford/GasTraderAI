@@ -1,3 +1,12 @@
+## [1.2.8] - 2026-07-18
+### Changed -- phantom verdict threshold (System 5 Review desk-wide, Rec 1 pattern)
+- **`VERDICT_THRESHOLD` 0.06 -> 0.02** ($/MMBtu, 1hr window). Like OilTrader, 0.06 was still
+  too coarse for NatGas's tiny hourly range (median |1hr| ~0.02, max ~0.04) -- 0%% of windows
+  classified, all NEUTRAL, Morgan starved of signal. Re-scored all 5 rows with 1hr data:
+  NEUTRAL 5 -> CORRECT 4 / NEUTRAL 1 (80%% classified; small sample). Data-only (logs/, gitignored).
+  No trading-rule change; no backtest required. Verdict threshold mis-scaling was assessed
+  desk-wide on 18 Jul; see the OilTrader v1.1.18 fix that established this pattern.
+
 ## [1.2.1] - 2026-07-16
 ### Fixed
 - Snag 9: confidence bar could display 50 when the real Morgan score was 0. The
