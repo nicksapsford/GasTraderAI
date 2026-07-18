@@ -188,6 +188,57 @@ def save_keywords(bullish, bearish, updated_by='Nick'):
             'last_updated': data['last_updated'], 'updated_by': data['updated_by']}
 
 
+# --- Macro sentiment overlay (Part 4) --------------------------------------
+# Desk-wide macro flag set in RoundTable (logs/macro_sentiment.json), re-read
+# every 5 min. Per-system nudge to the final Guinevere sentiment score, plus a
+# CRISIS-only confidence-bar raise applied by the trading engine.
+VALID_MACRO         = ('RISK_ON', 'NEUTRAL', 'RISK_OFF', 'CRISIS')
+MACRO_SCORE_ADJ     = {'RISK_ON': 0, 'NEUTRAL': 0, 'RISK_OFF': 0, 'CRISIS': 0}   # GAS
+MACRO_CONF_BAR_ADJ  = {'RISK_ON': 0, 'NEUTRAL': 0, 'RISK_OFF': 0, 'CRISIS': 10}   # all systems
+_macro_cache = {'ts': None, 'data': None}
+
+
+def get_macro():
+    """Current desk-wide macro sentiment flag from RoundTable (Part 4). 5-min cache.
+    Returns {'flag','set_at','set_by'}; defaults to NEUTRAL if the file is missing."""
+    now = datetime.now(timezone.utc)
+    if _macro_cache['data'] is not None and _macro_cache['ts'] is not None \
+            and (now - _macro_cache['ts']).total_seconds() < 300:
+        return _macro_cache['data']
+    data = {'flag': 'NEUTRAL', 'set_at': '', 'set_by': ''}
+    try:
+        with open(MACRO_FILE, encoding='utf-8') as f:
+            d = json.load(f)
+        flag = str(d.get('flag', 'NEUTRAL')).upper()
+        if flag not in VALID_MACRO:
+            flag = 'NEUTRAL'
+        data = {'flag': flag, 'set_at': d.get('set_at', ''), 'set_by': d.get('set_by', '')}
+    except Exception:
+        pass
+    _macro_cache['data'] = data
+    _macro_cache['ts'] = now
+    return data
+
+
+def get_macro_adjustment():
+    """(score_adj, conf_bar_adj, macro_state) for THIS system under the current flag."""
+    m = get_macro()
+    return MACRO_SCORE_ADJ.get(m['flag'], 0), MACRO_CONF_BAR_ADJ.get(m['flag'], 0), m
+
+
+def get_macro_context():
+    """One-line macro description for Arthur's prompt (Part 4)."""
+    score_adj, conf_bar, m = get_macro_adjustment()
+    parts = []
+    if score_adj:
+        parts.append("Guinevere sentiment score %+d" % score_adj)
+    if conf_bar:
+        parts.append("confidence bar +%d (trade more conservatively)" % conf_bar)
+    desc = "; ".join(parts) if parts else "no adjustment for this system"
+    return "Global macro sentiment: %s (set %s UTC). %s." % (
+        m['flag'], m.get('set_at') or 'n/a', desc)
+
+
 def _score_headline(title, description=''):
     """Score a headline: +1 per bullish keyword, -1 per bearish (case-insensitive
     phrase match). Keywords are the live editable set (logs/guinevere_keywords.json)."""
@@ -293,6 +344,12 @@ def fetch_gas_sentiment():
             if len(headlines) >= 5:
                 break
 
+        # Part 4: macro sentiment overlay -- Gas has no score nudge (all 0), but the
+        # CRISIS confidence-bar raise + macro flag still surface to Arthur.
+        macro_adj, macro_conf_bar, macro_state = get_macro_adjustment()
+        base_score = total_score
+        total_score += macro_adj
+
         # Determine overall sentiment
         if total_score >= 2:
             sentiment = 'BULLISH'
@@ -303,13 +360,19 @@ def fetch_gas_sentiment():
         else:
             sentiment = 'NEUTRAL'
             reason = f"Gas news NEUTRAL (score {total_score})"
+        if macro_adj:
+            reason += f" [macro {macro_state['flag']} {macro_adj:+d}]"
 
         result = {
             'sentiment': sentiment,
             'score': total_score,
             'headlines': headlines,
             'reason': reason,
-            'timestamp': datetime.now(timezone.utc)
+            'timestamp': datetime.now(timezone.utc),
+            'macro_flag': macro_state['flag'],
+            'macro_adj': macro_adj,
+            'macro_conf_bar': macro_conf_bar,
+            'base_score': base_score,
         }
         _news_cache = result
         logger.info(f"guinevere_news: {reason}")

@@ -1,3 +1,11 @@
+## [1.3.2] - 2026-07-18
+### Added -- Macro Sentiment Overlay reader (Guinevere Part 4)
+- **`get_macro()` / `get_macro_adjustment()` / `get_macro_context()`** in `guinevere_news.py`:
+  read RoundTable's `logs/macro_sentiment.json` (5-min cache) and apply this system's macro
+  nudge to the final Guinevere sentiment score (no score nudge; CRISIS confidence bar only).
+- Macro flag + this system's adjustment now appear in Arthur's prompt context.
+- CRISIS raises Arthur's confidence bar by 10 (trade more conservatively) desk-wide.
+
 ## [1.3.1] - 2026-07-18
 ### Added -- Guinevere live keyword editor (Guinevere Part 3)
 - **Dashboard keyword editor** below the Guinevere news panel: BULLISH / BEARISH

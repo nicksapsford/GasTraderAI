@@ -146,12 +146,19 @@ def _regime_block(bar_1d, proposed_direction, morgan_short, liquidity_period) ->
     ms = 30.0 if morgan_short is None else float(morgan_short)
     gate = "OPEN" if ms >= 65 else "CLOSED"
     rsi_1d = None if bar_1d is None else bar_1d.get("rsi")
+    macro_line = "Global macro sentiment: NEUTRAL (set n/a UTC). no adjustment for this system."
+    try:
+        import guinevere_news
+        macro_line = guinevere_news.get_macro_context()   # Part 4
+    except Exception:
+        pass
     return (
         "REGIME AND GATE (current) -- DATA COLLECTION MODE\n"
         f"  Daily SSL:         {ssl_1d}"
         + ("" if rsi_1d is None or pd.isna(rsi_1d) else f"  (daily RSI {float(rsi_1d):.1f})") + "\n"
         f"  Regime direction:  {proposed_direction or 'BOTH'}   (what to look for this session)\n"
         f"  Morgan SHORT conf: {ms:.1f}/100  ->  SHORT gate {gate} (SHORTs need >= 65)\n"
+        f"  Macro overlay:     {macro_line}\n"
         f"  Reminder:          protect capital; a well-reasoned STAY_OUT is a success here.\n"
         f"  Session:           {liquidity_period}"
     )
