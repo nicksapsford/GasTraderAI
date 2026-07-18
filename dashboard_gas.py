@@ -262,6 +262,12 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
 .shutdown-btn:hover{background:rgba(231,76,60,0.25);}
 .nav-btn{background:rgba(255,215,0,0.15);border:1px solid var(--gas);color:var(--gas);padding:4px 12px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;letter-spacing:0.3px;transition:background 0.15s;}
 .nav-btn:hover{background:rgba(255,215,0,0.32);}
+  /* Guinevere dedicated page (page 3) */
+  .guin-page{flex:1;overflow-y:auto;max-width:660px;width:100%;margin:0 auto;padding:16px 18px;display:flex;flex-direction:column;gap:10px;}
+  .guin-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:2px;}
+  #newsCardCompact{cursor:pointer;transition:background 0.15s;}
+  #newsCardCompact:hover{background:rgba(255,255,255,0.03);}
+
 
 /* SHUTDOWN MODAL */
 .modal-overlay{display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.78);justify-content:center;align-items:center;}
@@ -435,6 +441,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
   <div class="header-right">
     <div class="excalibur-status" id="excaliburStatus">Excalibur: --</div>
     <button class="nav-btn" id="btnToP2" onclick="showPage(2)">P&amp;L &rarr;</button>
+    <button class="nav-btn" id="btnToP3" onclick="showPage(3)">GUINEVERE &rarr;</button>
     <button class="nav-btn" id="btnToP1" onclick="showPage(1)" style="display:none;">&larr; Trading</button>
     <button class="shutdown-btn" onclick="openModal()">&#9211; Shutdown</button>
     <div class="clock" id="clock">--:--:-- UTC</div>
@@ -466,6 +473,17 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
       <div class="card-title">Gas Trade History</div>
       <div style="color:var(--muted);font-size:11px;">Loading...</div>
     </div>
+  </div>
+</div>
+
+<!-- PAGE 3: GUINEVERE (news sentiment + keyword editor) -->
+<div id="page3" class="page-wrap" style="display:none;">
+  <div class="guin-page">
+    <div class="guin-head">
+      <div class="card-title gas" style="border:none;margin:0;padding:0;">GUINEVERE &mdash; News Sentiment &amp; Keyword Editor</div>
+      <button class="nav-btn" onclick="showPage(1)">&larr; Back to Dashboard</button>
+    </div>
+    <div class="card" id="newsCard" style="flex-shrink:0"><div class="card-title gas">GUINEVERE NEWS</div><div style="color:var(--muted);font-size:11px;">Loading news...</div></div>
   </div>
 </div>
 
@@ -529,21 +547,17 @@ setInterval(updateLiquidityCountdown, 1000);
 
 /* -- Page switching ------------------------------------------------------- */
 function showPage(n){
-  var p1 = document.getElementById('page1');
-  var p2 = document.getElementById('page2');
+  var pages = {1:'page1', 2:'page2', 3:'page3'};
+  for(var k in pages){
+    var el = document.getElementById(pages[k]);
+    if(el){ el.style.display = (Number(k) === n) ? 'flex' : 'none'; }
+  }
   var b1 = document.getElementById('btnToP1');
   var b2 = document.getElementById('btnToP2');
-  if(n === 2){
-    p1.style.display = 'none';
-    p2.style.display = 'flex';
-    b1.style.display = 'inline-block';
-    b2.style.display = 'none';
-  } else {
-    p1.style.display = 'flex';
-    p2.style.display = 'none';
-    b1.style.display = 'none';
-    b2.style.display = 'inline-block';
-  }
+  var b3 = document.getElementById('btnToP3');
+  if(b1){ b1.style.display = (n === 1) ? 'none' : 'inline-block'; }
+  if(b2){ b2.style.display = (n === 2) ? 'none' : 'inline-block'; }
+  if(b3){ b3.style.display = (n === 3) ? 'none' : 'inline-block'; }
   _currentPage = n;
 }
 
@@ -726,6 +740,35 @@ function renderStayOutQuality(d){
 }
 
 /* -- GUINEVERE NEWS panel (polls /api/news every 60s) --------------------- */
+function renderNewsCompact(n){
+  var title = '<div class="card-title gas">GUINEVERE</div>';
+  var hint = '<div style="margin-top:6px;font-size:9px;color:var(--muted);letter-spacing:0.4px;">CLICK FOR FULL NEWS &amp; KEYWORD EDITOR &rarr;</div>';
+  if(!n){
+    return '<div class="card" id="newsCardCompact" style="flex-shrink:0" onclick="showPage(3)">' + title +
+      '<div style="color:var(--muted);font-size:11px;">Loading...</div>' + hint + '</div>';
+  }
+  var sent  = n.sentiment || 'NEUTRAL';
+  var scls  = sent === 'BULLISH' ? 'bull' : sent === 'BEARISH' ? 'bear' : 'neut';
+  var score = (n.score === undefined || n.score === null) ? 0 : n.score;
+  var scoreTxt = (score > 0 ? '+' : '') + score;
+  var hls = (n.headlines || []).filter(function(h){ var s=(h.score===undefined||h.score===null)?0:h.score; return Math.abs(s) >= 1; });
+  var topHTML;
+  if(hls.length){
+    var ttl = (hls[0].title || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    var hs  = hls[0].score;
+    var hcls = hs > 0 ? 'bull' : 'bear';
+    var hst  = (hs > 0 ? '+' : '') + hs;
+    topHTML = '<div style="margin-top:5px;font-size:10px;display:flex;gap:6px;align-items:center;">' +
+              '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + ttl + '</span>' +
+              '<span class="' + hcls + '">' + hst + '</span></div>';
+  } else {
+    topHTML = '<div style="margin-top:5px;font-size:10px;color:var(--muted);">No significant headlines</div>';
+  }
+  return '<div class="card" id="newsCardCompact" style="flex-shrink:0" onclick="showPage(3)">' + title +
+    '<div style="font-size:11px;">Sentiment: <span class="' + scls + '">' + sent + '</span>' +
+    ' &nbsp; Score: <span class="' + scls + '">' + scoreTxt + '</span></div>' +
+    topHTML + hint + '</div>';
+}
 function renderNewsCard(n){
   var title = '<div class="card-title gas">GUINEVERE NEWS</div>';
   if(!n){
@@ -775,8 +818,10 @@ function pollNews(){
     .then(function(r){ return r.json(); })
     .then(function(n){
       _newsData = n;
-      var el = document.getElementById('newsCard');
-      if(el){ el.outerHTML = renderNewsCard(n); }
+      var full = document.getElementById('newsCard');
+      if(full){ full.outerHTML = renderNewsCard(n); }
+      var comp = document.getElementById('newsCardCompact');
+      if(comp){ comp.outerHTML = renderNewsCompact(n); }
     })
     .catch(function(e){ console.error('News poll error:', e); });
 }
@@ -830,7 +875,7 @@ function renderRightPanel(d){
   var calHTML = '<div class="card" style="flex-shrink:0"><div class="card-title gas">Guinevere -- Gas Calendar</div>' +
     '<div style="color:var(--text);font-size:11px;line-height:1.5;">' + calText + '</div></div>';
 
-  return sysHTML + renderStayOutQuality(d) + renderNewsCard(_newsData) + panelHTML + calHTML;
+  return sysHTML + renderStayOutQuality(d) + renderNewsCompact(_newsData) + panelHTML + calHTML;
 }
 
 /* -- Page 1: trading dashboard -------------------------------------------- */

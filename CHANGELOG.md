@@ -1,3 +1,12 @@
+## [1.3.4] - 2026-07-18
+### Changed -- Guinevere moved to a dedicated page (display only)
+- The full Guinevere section (news sentiment + keyword editor) now lives on a dedicated
+  page reached via a **GUINEVERE** button in the header (same pattern as P&L), with a
+  "Back to Dashboard" link. This fixes the editor overlapping the main grid and the
+  ADD BEARISH button falling below the visible area in the narrow right panel.
+- The main dashboard right panel now shows a **compact** Guinevere summary (sentiment +
+  score + top headline) that opens the full page on click. No trading-logic change.
+
 ## [1.3.3] - 2026-07-18
 ### Fixed -- Snag 17: session-aware liquidity countdown
 - The dashboard countdown now shows the CURRENT open session and counts down to the
