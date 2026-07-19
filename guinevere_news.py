@@ -199,11 +199,14 @@ _macro_cache = {'ts': None, 'data': None}
 
 
 def get_macro():
-    """Current desk-wide macro sentiment flag from RoundTable (Part 4). 5-min cache.
+    """Current desk-wide macro sentiment flag from RoundTable. Re-read fresh from disk
+    on every Arthur consultation -- live, no restart needed to change the flag (Macro
+    Live Reload, 19 Jul 2026). A 5-second debounce coalesces the several get_macro()
+    calls made within one consultation so high-frequency ticks don't hammer disk.
     Returns {'flag','set_at','set_by'}; defaults to NEUTRAL if the file is missing."""
     now = datetime.now(timezone.utc)
     if _macro_cache['data'] is not None and _macro_cache['ts'] is not None \
-            and (now - _macro_cache['ts']).total_seconds() < 300:
+            and (now - _macro_cache['ts']).total_seconds() < 5:
         return _macro_cache['data']
     data = {'flag': 'NEUTRAL', 'set_at': '', 'set_by': ''}
     try:

@@ -1,3 +1,14 @@
+## [1.3.6] - 2026-07-19
+### Changed -- Macro Sentiment Live Reload (required before go-live)
+- `get_macro()` now re-reads `macro_sentiment.json` fresh from disk on every Arthur
+  consultation instead of caching for 5 min at startup. Changing the macro flag on
+  RoundTable (e.g. NEUTRAL -> RISK_OFF) now takes effect on the next consultation --
+  within one candle interval, NO restart, open positions unaffected.
+- A 5-second debounce coalesces the several get_macro() calls made within a single
+  consultation (fetch_sentiment / format_news_context / regime_block) so it doesn't
+  hammer disk. Weighting logic unchanged -- overlay still feeds Arthur as context +
+  directional sentiment only; Arthur makes every call.
+
 ## [1.3.5] - 2026-07-19
 ### Added -- dedicated PHANTOM page (desk rollout, template CryptoTrader v1.7.3)
 - New **PHANTOM &rarr;** header button opens page 4: "PHANTOM TRADES -- Stay Out Quality"
