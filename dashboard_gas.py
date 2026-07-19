@@ -58,15 +58,15 @@ def get_stay_out_quality():
     try:
         with open(csv_path, 'r', encoding='utf-8') as f:
             rows = list(csv.DictReader(f))
-        last_10 = rows[-10:]
-        correct = sum(1 for r in last_10 if r.get('verdict') == 'CORRECT')
-        wrong   = sum(1 for r in last_10 if r.get('verdict') == 'WRONG')
-        neutral = sum(1 for r in last_10 if r.get('verdict') == 'NEUTRAL')
+        last_20 = rows[-20:]
+        correct = sum(1 for r in last_20 if r.get('verdict') == 'CORRECT')
+        wrong   = sum(1 for r in last_20 if r.get('verdict') == 'WRONG')
+        neutral = sum(1 for r in last_20 if r.get('verdict') == 'NEUTRAL')
         total   = (correct + wrong + neutral)
         quality_score = round((correct / total) * 100) if total else 0
-        net_saved  = sum(float(r.get('pnl_1hr', 0) or 0) for r in last_10 if r.get('verdict') == 'CORRECT')
-        net_missed = sum(float(r.get('pnl_1hr', 0) or 0) for r in last_10 if r.get('verdict') == 'WRONG')
-        return {'status': 'ok', 'decisions': last_10, 'quality_score': quality_score,
+        net_saved  = sum(float(r.get('pnl_1hr', 0) or 0) for r in last_20 if r.get('verdict') == 'CORRECT')
+        net_missed = sum(float(r.get('pnl_1hr', 0) or 0) for r in last_20 if r.get('verdict') == 'WRONG')
+        return {'status': 'ok', 'decisions': last_20, 'quality_score': quality_score,
                 'net_saved': net_saved, 'net_missed': net_missed, 'correct': correct, 'wrong': wrong, 'neutral': neutral}
     except Exception as e:
         return {'status': 'Error: ' + str(e), 'decisions': []}
@@ -262,6 +262,22 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
 .shutdown-btn:hover{background:rgba(231,76,60,0.25);}
 .nav-btn{background:rgba(255,215,0,0.15);border:1px solid var(--gas);color:var(--gas);padding:4px 12px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;letter-spacing:0.3px;transition:background 0.15s;}
 .nav-btn:hover{background:rgba(255,215,0,0.32);}
+/* Phantom Trades page (rollout 19 Jul) */
+.phantom-page{flex:1;overflow-y:auto;max-width:900px;width:100%;margin:0 auto;padding:16px 20px;display:flex;flex-direction:column;gap:14px;}
+.phantom-head{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.phantom-summary{background:rgba(255,255,255,0.03);border:1px solid var(--border,#333);border-radius:8px;padding:12px 16px;font-size:13px;line-height:1.9;}
+.phantom-summary .ps-q{font-weight:700;}
+.phantom-table{width:100%;border-collapse:collapse;font-size:12px;}
+.phantom-table th{text-align:left;color:var(--muted,#888);font-weight:600;padding:6px 10px;border-bottom:1px solid var(--border,#333);white-space:nowrap;}
+.phantom-table td{padding:6px 10px;border-bottom:1px solid rgba(255,255,255,0.05);white-space:nowrap;}
+.phantom-table tr:hover td{background:rgba(255,255,255,0.02);}
+.v-correct{color:#3fb950;font-weight:700;}
+.v-wrong{color:#f85149;font-weight:700;}
+.v-neutral{color:#8b949e;font-weight:700;}
+.v-pending{color:#d29922;font-weight:700;}
+#soqCompact{cursor:pointer;transition:background 0.15s;}
+#soqCompact:hover{background:rgba(255,255,255,0.03);}
+
   /* Guinevere dedicated page (page 3) */
   .guin-page{flex:1;overflow-y:auto;max-width:660px;width:100%;margin:0 auto;padding:16px 18px;display:flex;flex-direction:column;gap:10px;}
   .guin-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:2px;}
@@ -442,6 +458,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
     <div class="excalibur-status" id="excaliburStatus">Excalibur: --</div>
     <button class="nav-btn" id="btnToP2" onclick="showPage(2)">P&amp;L &rarr;</button>
     <button class="nav-btn" id="btnToP3" onclick="showPage(3)">GUINEVERE &rarr;</button>
+    <button class="nav-btn" id="btnToP4" onclick="showPage(4)">PHANTOM &rarr;</button>
     <button class="nav-btn" id="btnToP1" onclick="showPage(1)" style="display:none;">&larr; Trading</button>
     <button class="shutdown-btn" onclick="openModal()">&#9211; Shutdown</button>
     <div class="clock" id="clock">--:--:-- UTC</div>
@@ -487,8 +504,73 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
   </div>
 </div>
 
+<!-- PAGE 4: PHANTOM TRADES -->
+<div id="page4" class="page-wrap" style="display:none;">
+  <div class="phantom-page">
+    <div class="phantom-head">
+      <div class="card-title gas" style="border:none;margin:0;padding:0;font-size:14px;">PHANTOM TRADES &mdash; Stay Out Quality</div>
+      <button class="nav-btn" onclick="showPage(1)">&larr; Back to Dashboard</button>
+    </div>
+    <div id="phantomBody"><div style="color:var(--muted);font-size:12px;">Loading phantom trades...</div></div>
+  </div>
+</div>
+
 <script>
 var _currentPage = 1;
+
+/* Phantom Trades page + compact Stay Out Quality (desk rollout 19 Jul 2026) */
+var PHANTOM_PAGE = 4;
+function renderSoqCompact(sq){
+  sq = sq || {};
+  var title = '<div class="card-title gas">STAY OUT QUALITY</div>';
+  var hint = '<div style="margin-top:6px;font-size:9px;color:var(--muted);letter-spacing:0.4px;">CLICK FOR FULL PHANTOM TRADES &rarr;</div>';
+  if(sq.status !== 'ok'){
+    return '<div class="card" id="soqCompact" style="flex-shrink:0" onclick="showPage(PHANTOM_PAGE)">' + title +
+      '<div style="color:var(--muted);font-size:11px;">Awaiting first decisions</div>' + hint + '</div>';
+  }
+  var qs = (sq.quality_score == null) ? 0 : sq.quality_score;
+  var saved  = (sq.net_saved  == null) ? 0 : sq.net_saved;
+  var missed = (sq.net_missed == null) ? 0 : sq.net_missed;
+  return '<div class="card" id="soqCompact" style="flex-shrink:0" onclick="showPage(PHANTOM_PAGE)">' + title +
+    '<div style="font-size:11px;margin-top:3px;">Quality: <span>' + qs + '%</span> &nbsp;|&nbsp; Last 20</div>' +
+    '<div style="font-size:11px;margin:4px 0;">✅ Correct: ' + (sq.correct||0) + ' &nbsp; ❌ Wrong: ' + (sq.wrong||0) + ' &nbsp; ➖ Neutral: ' + (sq.neutral||0) + '</div>' +
+    '<div style="font-size:11px;">Net Saved: <span class="bull">+£' + Math.abs(saved).toFixed(2) + '</span> &nbsp; Net Missed: <span class="bear">-£' + Math.abs(missed).toFixed(2) + '</span></div>' +
+    hint + '</div>';
+}
+function fmtPhantomTs(ts){ if(!ts){ return '--'; } var s = String(ts).replace('T',' '); return (s.length>=16)?s.substring(0,16):s; }
+function fmtPhantomGBP(v){ var n = parseFloat(v); if(isNaN(n)){ return '--'; } return '£' + n.toLocaleString('en-GB',{maximumFractionDigits:2}); }
+function renderPhantomBody(sq){
+  sq = sq || {};
+  if(!sq.status || sq.status === 'No data yet'){ return '<div style="color:var(--muted);font-size:12px;line-height:1.6;">GasTrader is currently in data collection mode. Phantom trade data will appear here once sufficient signals have been recorded.</div>'; }
+  if(sq.status !== 'ok'){ return '<div style="color:var(--muted);font-size:12px;">' + sq.status + '</div>'; }
+  var q = (sq.quality_score == null) ? '--' : (sq.quality_score + '%');
+  var saved  = (sq.net_saved  == null) ? 0 : sq.net_saved;
+  var missed = (sq.net_missed == null) ? 0 : sq.net_missed;
+  var html = '<div class="phantom-summary">' +
+    '<div>Last 20 decisions &nbsp;|&nbsp; Quality: <span class="ps-q">' + q + '</span></div>' +
+    '<div>✅ Correct: ' + (sq.correct||0) + ' &nbsp;&nbsp; ❌ Wrong: ' + (sq.wrong||0) + ' &nbsp;&nbsp; ➖ Neutral: ' + (sq.neutral||0) + '</div>' +
+    '<div>Net Saved: <span class="bull">+£' + Math.abs(saved).toFixed(2) + '</span> &nbsp;&nbsp; Net Missed: <span class="bear">-£' + Math.abs(missed).toFixed(2) + '</span></div>' +
+    '</div>';
+  var decs = (sq.decisions || []).slice(); decs.reverse();
+  html += '<table class="phantom-table"><thead><tr>' +
+    '<th>Date/Time (UTC)</th><th>Direction</th><th>Entry Price</th><th>Confidence</th><th>1hr Move</th><th>Verdict</th>' +
+    '</tr></thead><tbody>';
+  for(var i=0;i<decs.length;i++){
+    var r = decs[i] || {};
+    var dir = r.direction_blocked || r.direction || '--';
+    var entry = fmtPhantomGBP(r.price_at_decision);
+    var conf = r.confidence || '--';
+    var pnl = parseFloat(r.pnl_1hr);
+    var pnlStr = isNaN(pnl) ? '--' : ((pnl>=0?'+£':'-£') + Math.abs(pnl).toFixed(2));
+    var pnlCls = isNaN(pnl) ? '' : (pnl>=0?'bull':'bear');
+    var v = r.verdict || 'PENDING';
+    var vCls = (v==='CORRECT')?'v-correct':(v==='WRONG')?'v-wrong':(v==='NEUTRAL')?'v-neutral':'v-pending';
+    html += '<tr><td>' + fmtPhantomTs(r.timestamp) + '</td><td>' + dir + '</td><td>' + entry + '</td><td>' + conf + '</td><td class="' + pnlCls + '">' + pnlStr + '</td><td><span class="' + vCls + '">' + v + '</span></td></tr>';
+  }
+  html += '</tbody></table>';
+  return html;
+}
+
 var hasOpenPosition = false;
 var _newsData = null;
 
@@ -547,7 +629,7 @@ setInterval(updateLiquidityCountdown, 1000);
 
 /* -- Page switching ------------------------------------------------------- */
 function showPage(n){
-  var pages = {1:'page1', 2:'page2', 3:'page3'};
+  var pages = {1:'page1', 2:'page2', 3:'page3', 4:'page4'};
   for(var k in pages){
     var el = document.getElementById(pages[k]);
     if(el){ el.style.display = (Number(k) === n) ? 'flex' : 'none'; }
@@ -555,9 +637,11 @@ function showPage(n){
   var b1 = document.getElementById('btnToP1');
   var b2 = document.getElementById('btnToP2');
   var b3 = document.getElementById('btnToP3');
+  var b4 = document.getElementById('btnToP4');
   if(b1){ b1.style.display = (n === 1) ? 'none' : 'inline-block'; }
   if(b2){ b2.style.display = (n === 2) ? 'none' : 'inline-block'; }
   if(b3){ b3.style.display = (n === 3) ? 'none' : 'inline-block'; }
+  if(b4){ b4.style.display = (n === 4) ? 'none' : 'inline-block'; }
   _currentPage = n;
 }
 
@@ -875,7 +959,7 @@ function renderRightPanel(d){
   var calHTML = '<div class="card" style="flex-shrink:0"><div class="card-title gas">Guinevere -- Gas Calendar</div>' +
     '<div style="color:var(--text);font-size:11px;line-height:1.5;">' + calText + '</div></div>';
 
-  return sysHTML + renderStayOutQuality(d) + renderNewsCompact(_newsData) + panelHTML + calHTML;
+  return sysHTML + renderSoqCompact(d.stay_out_quality) + renderNewsCompact(_newsData) + panelHTML + calHTML;
 }
 
 /* -- Page 1: trading dashboard -------------------------------------------- */
@@ -995,6 +1079,9 @@ function renderPage1(d){
   var rightCol = '<div class="col">' + renderRightPanel(d) + '</div>';
 
   document.getElementById('main-grid').innerHTML = leftCol + centreCol + rightCol;
+
+  var _pb = document.getElementById('phantomBody');
+  if(_pb){ _pb.innerHTML = renderPhantomBody(d.stay_out_quality); }
 }
 
 /* -- Page 2: P&L and performance ------------------------------------------ */

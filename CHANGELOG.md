@@ -1,3 +1,15 @@
+## [1.3.5] - 2026-07-19
+### Added -- dedicated PHANTOM page (desk rollout, template CryptoTrader v1.7.3)
+- New **PHANTOM &rarr;** header button opens page 4: "PHANTOM TRADES -- Stay Out Quality"
+  with a summary (Quality %% / Correct / Wrong / Neutral / Net Saved / Net Missed) and a
+  clean **last-20** table (newest first): Date/Time UTC | Direction | Entry Price |
+  Confidence | 1hr Move | colour-coded Verdict. Back to Dashboard + Trading nav.
+- The right-panel Stay Out Quality card is now a **compact** clickable summary that opens
+  the full page. Standardised to the last 20 rows (was 10). Display only -- reads the same
+  get_stay_out_quality() data; no threshold/logic/recording change.
+- In data-collection mode the phantom tracker is active (rows present), so the page renders
+  normally; if it is ever empty it shows a data-collection-mode message instead of a blank table.
+
 ## [1.3.4] - 2026-07-18
 ### Changed -- Guinevere moved to a dedicated page (display only)
 - The full Guinevere section (news sentiment + keyword editor) now lives on a dedicated
