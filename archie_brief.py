@@ -89,6 +89,35 @@ def _morgan_journey(logs_dir):
     return None, None
 
 
+def _phantom_recent(soq, appender, show_market=False):
+    """Snag 19 (20 Jul 2026): the last 5 phantom rows under STAY OUT QUALITY, newest
+    first, so Archie sees overnight phantom activity inline without a screenshot.
+    Columns: Date/Time (UTC) [| Market] | Direction | Confidence | 1hr Move | Verdict.
+    Entry price omitted; PENDING rows shown as PENDING; empty -> 'No phantom data yet'."""
+    appender("PHANTOM RECENT (last 5):")
+    decisions = soq.get("decisions")
+    if not isinstance(decisions, list) or not decisions:
+        appender("  No phantom data yet")
+        return
+    for r in list(reversed(decisions))[:5]:
+        if not isinstance(r, dict):
+            continue
+        ts = (str(r.get("timestamp") or "").replace("T", " ")[:16]) or "--"
+        direction = str(r.get("direction_blocked") or r.get("direction") or "--")
+        conf = str(r.get("confidence") or "--")
+        try:
+            pv = float(r.get("pnl_1hr"))
+            move = ("+£%.2f" % pv) if pv >= 0 else ("-£%.2f" % abs(pv))
+        except (TypeError, ValueError):
+            move = "--"
+        verdict = str(r.get("verdict") or "PENDING") or "PENDING"
+        if show_market:
+            appender("  %-16s  %-3s  %-5s  %-6s  %-10s  %s" % (
+                ts, str(r.get("market") or "--"), direction, conf, move, verdict))
+        else:
+            appender("  %-16s  %-5s  %-6s  %-10s  %s" % (ts, direction, conf, move, verdict))
+
+
 def build_system_brief(state, system_name, asset_label, logs_dir=None, now_utc=None):
     now_utc = now_utc or datetime.now(timezone.utc)
     ver = state.get("version_string") or ("v" + str(state.get("version", "--")))
@@ -193,6 +222,7 @@ def build_system_brief(state, system_name, asset_label, logs_dir=None, now_utc=N
     _sv = abs(float(soq.get("net_saved", 0) or 0))
     _ms = abs(float(soq.get("net_missed", 0) or 0))
     a("Net Saved: GBP +%s | Net Missed: GBP -%s" % (_num(_sv, 2), _num(_ms, 2)))
+    _phantom_recent(soq, a, show_market=("crypto" in (system_name or "").lower()))
     a("")
     a("GUINEVERE")
     gkind = _guinevere_kind(system_name)

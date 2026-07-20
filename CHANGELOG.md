@@ -1,3 +1,11 @@
+## [1.3.7] - 2026-07-20
+### Added -- Snag 19: recent phantom rows in the Archie Brief
+- The Archie Brief now lists the **last 5 phantom rows** (newest first) directly under
+  the STAY OUT QUALITY summary, so Archie sees overnight phantom activity inline without
+  a separate PHANTOM-page screenshot. Columns: Date/Time (UTC), Direction, Confidence,
+  1hr Move, Verdict. PENDING rows shown as PENDING; empty -> "No phantom data yet".
+  Display only -- reads the same stay_out_quality decisions; no logic/threshold change.
+
 ## [1.3.6] - 2026-07-19
 ### Changed -- Macro Sentiment Live Reload (required before go-live)
 - `get_macro()` now re-reads `macro_sentiment.json` fresh from disk on every Arthur
