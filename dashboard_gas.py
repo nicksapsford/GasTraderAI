@@ -58,7 +58,7 @@ def get_stay_out_quality():
     try:
         with open(csv_path, 'r', encoding='utf-8') as f:
             rows = list(csv.DictReader(f))
-        last_20 = rows[-20:]
+        last_20 = rows[-50:]
         correct = sum(1 for r in last_20 if r.get('verdict') == 'CORRECT')
         wrong   = sum(1 for r in last_20 if r.get('verdict') == 'WRONG')
         neutral = sum(1 for r in last_20 if r.get('verdict') == 'NEUTRAL')
@@ -267,6 +267,8 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
 .phantom-head{display:flex;align-items:center;justify-content:space-between;gap:12px;}
 .phantom-summary{background:rgba(255,255,255,0.03);border:1px solid var(--border,#333);border-radius:8px;padding:12px 16px;font-size:13px;line-height:1.9;}
 .phantom-summary .ps-q{font-weight:700;}
+.phantom-scroll{max-height:600px;overflow:auto;}
+.phantom-table td.ph-na{color:var(--muted,#888);}
 .phantom-table{width:100%;border-collapse:collapse;font-size:12px;}
 .phantom-table th{text-align:left;color:var(--muted,#888);font-weight:600;padding:6px 10px;border-bottom:1px solid var(--border,#333);white-space:nowrap;}
 .phantom-table td{padding:6px 10px;border-bottom:1px solid rgba(255,255,255,0.05);white-space:nowrap;}
@@ -532,13 +534,19 @@ function renderSoqCompact(sq){
   var saved  = (sq.net_saved  == null) ? 0 : sq.net_saved;
   var missed = (sq.net_missed == null) ? 0 : sq.net_missed;
   return '<div class="card" id="soqCompact" style="flex-shrink:0" onclick="showPage(PHANTOM_PAGE)">' + title +
-    '<div style="font-size:11px;margin-top:3px;">Quality: <span>' + qs + '%</span> &nbsp;|&nbsp; Last 20</div>' +
+    '<div style="font-size:11px;margin-top:3px;">Quality: <span>' + qs + '%</span> &nbsp;|&nbsp; Last 50</div>' +
     '<div style="font-size:11px;margin:4px 0;">✅ Correct: ' + (sq.correct||0) + ' &nbsp; ❌ Wrong: ' + (sq.wrong||0) + ' &nbsp; ➖ Neutral: ' + (sq.neutral||0) + '</div>' +
     '<div style="font-size:11px;">Net Saved: <span class="bull">+£' + Math.abs(saved).toFixed(2) + '</span> &nbsp; Net Missed: <span class="bear">-£' + Math.abs(missed).toFixed(2) + '</span></div>' +
     hint + '</div>';
 }
 function fmtPhantomTs(ts){ if(!ts){ return '--'; } var s = String(ts).replace('T',' '); return (s.length>=16)?s.substring(0,16):s; }
 function fmtPhantomGBP(v){ var n = parseFloat(v); if(isNaN(n)){ return '--'; } return '£' + n.toLocaleString('en-GB',{maximumFractionDigits:2}); }
+function phMoveCell(v){
+  var n = parseFloat(v);
+  if(isNaN(n)){ return '<td class="ph-na">--</td>'; }
+  var cls = (n>=0)?'bull':'bear';
+  return '<td class="'+cls+'">'+(n>=0?'+£':'-£')+Math.abs(n).toFixed(2)+'</td>';
+}
 function renderPhantomBody(sq){
   sq = sq || {};
   if(!sq.status || sq.status === 'No data yet'){ return '<div style="color:var(--muted);font-size:12px;line-height:1.6;">GasTrader is currently in data collection mode. Phantom trade data will appear here once sufficient signals have been recorded.</div>'; }
@@ -547,13 +555,13 @@ function renderPhantomBody(sq){
   var saved  = (sq.net_saved  == null) ? 0 : sq.net_saved;
   var missed = (sq.net_missed == null) ? 0 : sq.net_missed;
   var html = '<div class="phantom-summary">' +
-    '<div>Last 20 decisions &nbsp;|&nbsp; Quality: <span class="ps-q">' + q + '</span></div>' +
+    '<div>Last 50 decisions &nbsp;|&nbsp; Quality: <span class="ps-q">' + q + '</span></div>' +
     '<div>✅ Correct: ' + (sq.correct||0) + ' &nbsp;&nbsp; ❌ Wrong: ' + (sq.wrong||0) + ' &nbsp;&nbsp; ➖ Neutral: ' + (sq.neutral||0) + '</div>' +
     '<div>Net Saved: <span class="bull">+£' + Math.abs(saved).toFixed(2) + '</span> &nbsp;&nbsp; Net Missed: <span class="bear">-£' + Math.abs(missed).toFixed(2) + '</span></div>' +
     '</div>';
   var decs = (sq.decisions || []).slice(); decs.reverse();
-  html += '<table class="phantom-table"><thead><tr>' +
-    '<th>Date/Time (UTC)</th><th>Direction</th><th>Entry Price</th><th>Confidence</th><th>1hr Move</th><th>Verdict</th>' +
+  html += '<div class="phantom-scroll"><table class="phantom-table"><thead><tr>' +
+    '<th>Date/Time (UTC)</th><th>Direction</th><th>Entry Price</th><th>Confidence</th><th>5min</th><th>10min</th><th>15min</th><th>30min</th><th>1hr</th><th>2hr</th><th>Verdict</th>' +
     '</tr></thead><tbody>';
   for(var i=0;i<decs.length;i++){
     var r = decs[i] || {};
@@ -565,9 +573,9 @@ function renderPhantomBody(sq){
     var pnlCls = isNaN(pnl) ? '' : (pnl>=0?'bull':'bear');
     var v = r.verdict || 'PENDING';
     var vCls = (v==='CORRECT')?'v-correct':(v==='WRONG')?'v-wrong':(v==='NEUTRAL')?'v-neutral':'v-pending';
-    html += '<tr><td>' + fmtPhantomTs(r.timestamp) + '</td><td>' + dir + '</td><td>' + entry + '</td><td>' + conf + '</td><td class="' + pnlCls + '">' + pnlStr + '</td><td><span class="' + vCls + '">' + v + '</span></td></tr>';
+    html += '<tr><td>' + fmtPhantomTs(r.timestamp) + '</td><td>' + dir + '</td><td>' + entry + '</td><td>' + conf + '</td>' + phMoveCell(r.pnl_5min) + phMoveCell(r.pnl_10min) + phMoveCell(r.pnl_15min) + phMoveCell(r.pnl_30min) + phMoveCell(r.pnl_1hr) + phMoveCell(r.pnl_2hr) + '<td><span class="' + vCls + '">' + v + '</span></td></tr>';
   }
-  html += '</tbody></table>';
+  html += '</tbody></table></div>';
   return html;
 }
 
@@ -1406,6 +1414,23 @@ setInterval(pollNews, 60000);
   else { boot(); }
 })();
 </script>
+<!-- PHANTOM BRIEF -->
+<script>
+(function(){
+  var L='&#9993; PHANTOM BRIEF';
+  function fb(txt,done){var ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.top='-2000px';ta.style.opacity='0';document.body.appendChild(ta);ta.focus();ta.select();try{document.execCommand('copy');}catch(e){}document.body.removeChild(ta);done();}
+  function cp(txt,btn){function done(){btn.classList.add('archie-copied');btn.textContent='Copied!';setTimeout(function(){btn.classList.remove('archie-copied');btn.innerHTML=L;},2000);}if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(txt).then(done,function(){fb(txt,done);});}else{fb(txt,done);}}
+  window.phantomBrief=function(btn){btn.textContent='...';fetch('/api/phantom-brief').then(function(r){return r.text();}).then(function(txt){cp(txt,btn);}).catch(function(){btn.textContent='Error';setTimeout(function(){btn.innerHTML=L;},2000);});};
+  function inject(){
+    if(document.getElementById('phantomBriefBtn'))return;
+    var head=document.querySelector('.phantom-head');if(!head)return;
+    if(!document.getElementById('phBriefStyle')){var st=document.createElement('style');st.id='phBriefStyle';st.textContent='.archie-btn{background:rgba(52,152,219,0.10);border:1px solid #3498db;color:#3498db;padding:4px 9px;border-radius:4px;font-size:10px;cursor:pointer;letter-spacing:0.5px;text-transform:uppercase;}.archie-btn:hover{background:rgba(52,152,219,0.25);}.archie-btn.archie-copied{background:rgba(46,204,113,0.22);border-color:#2ecc71;color:#2ecc71;}';document.head.appendChild(st);}
+    var btn=document.createElement('button');btn.id='phantomBriefBtn';btn.className='archie-btn';btn.type='button';btn.innerHTML=L;btn.setAttribute('onclick','phantomBrief(this)');
+    head.appendChild(btn);
+  }
+  if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',inject);}else{inject();}
+})();
+</script>
 </body>
 </html>"""
 
@@ -1513,6 +1538,137 @@ def _compute_flat_fields(s: dict) -> dict:
     except Exception:
         pass
     return out
+
+
+def _phantom_verdict(pnl, thr):
+    if pnl is None:
+        return None
+    if pnl > thr:
+        return 'WRONG'
+    if pnl < -thr:
+        return 'CORRECT'
+    return 'NEUTRAL'
+
+
+def build_phantom_brief():
+    """Plain-text phantom-trades brief for pasting to Archie (Phantom Page
+    Enhancements, 21 Jul 2026). Multi-horizon moves + 30min/2hr verdict
+    distributions computed on the fly -- the stored 1hr verdict is unchanged."""
+    import phantom_tracker as _pt
+    from datetime import datetime, timezone
+    name = "GasTrader"
+    has_market = False
+    csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs', 'phantom_trades.csv')
+    rows = []
+    if os.path.exists(csv_path):
+        try:
+            with open(csv_path, 'r', encoding='utf-8') as f:
+                rows = list(csv.DictReader(f))
+        except Exception:
+            rows = []
+    recent = rows[-50:]
+
+    def fnum(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    def thr_for(r):
+        t = _pt.VERDICT_THRESHOLD
+        if isinstance(t, dict):
+            m = (r.get('market') or '').upper()
+            if 'ETH' in m:
+                return t.get('ETH', 4.0)
+            if 'BTC' in m:
+                return t.get('BTC', 14.0)
+            return getattr(_pt, 'VERDICT_THRESHOLD_DEFAULT', 10.0)
+        return t
+
+    def mv(v):
+        n = fnum(v)
+        if n is None:
+            return '--'
+        return ('+£%.2f' % n) if n >= 0 else ('-£%.2f' % abs(n))
+
+    correct = sum(1 for r in recent if r.get('verdict') == 'CORRECT')
+    wrong = sum(1 for r in recent if r.get('verdict') == 'WRONG')
+    neutral = sum(1 for r in recent if r.get('verdict') == 'NEUTRAL')
+    total = correct + wrong + neutral
+    quality = round(correct / total * 100) if total else 0
+    net_saved = sum(fnum(r.get('pnl_1hr')) or 0 for r in recent if r.get('verdict') == 'CORRECT')
+    net_missed = sum(fnum(r.get('pnl_1hr')) or 0 for r in recent if r.get('verdict') == 'WRONG')
+
+    def dist(col):
+        c = w = n = 0
+        for r in recent:
+            v = _phantom_verdict(fnum(r.get(col)), thr_for(r))
+            if v == 'CORRECT':
+                c += 1
+            elif v == 'WRONG':
+                w += 1
+            elif v == 'NEUTRAL':
+                n += 1
+        return c, w, n
+
+    c30, w30, n30 = dist('pnl_30min')
+    c2h, w2h, n2h = dist('pnl_2hr')
+
+    flips = both = wc = cw = 0
+    for r in recent:
+        v1 = _phantom_verdict(fnum(r.get('pnl_1hr')), thr_for(r))
+        v2 = _phantom_verdict(fnum(r.get('pnl_2hr')), thr_for(r))
+        if v1 and v2:
+            both += 1
+            if v1 != v2:
+                flips += 1
+                if v1 == 'WRONG' and v2 == 'CORRECT':
+                    wc += 1
+                elif v1 == 'CORRECT' and v2 == 'WRONG':
+                    cw += 1
+    flip_rate = round(flips / both * 100) if both else 0
+    common = 'WRONG->CORRECT' if wc >= cw else 'CORRECT->WRONG'
+
+    bar = '=' * 64
+    ts = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    L = []
+    L.append(bar)
+    L.append('ARCHIE BRIEF -- %s PHANTOM TRADES' % name.upper())
+    L.append('Generated: %s UTC' % ts)
+    L.append(bar)
+    L.append('')
+    L.append('SUMMARY')
+    L.append('  Quality: %d%% | Last %d decisions' % (quality, len(recent)))
+    L.append('  Correct: %d | Wrong: %d | Neutral: %d' % (correct, wrong, neutral))
+    L.append('  Net Saved: GBP +%.2f | Net Missed: GBP -%.2f' % (abs(net_saved), abs(net_missed)))
+    L.append('')
+    L.append('TIME HORIZON ANALYSIS (from available data)')
+    L.append('  30min verdict distribution:')
+    L.append('    Correct: %d | Wrong: %d | Neutral: %d' % (c30, w30, n30))
+    L.append('  2hr verdict distribution:')
+    L.append('    Correct: %d | Wrong: %d | Neutral: %d' % (c2h, w2h, n2h))
+    L.append('  Verdict flip rate (1hr->2hr): %d%% of rows change verdict' % flip_rate)
+    L.append('  Most common flip: %s (%d WRONG->CORRECT, %d CORRECT->WRONG)' % (common, wc, cw))
+    L.append('')
+    L.append('RECENT PHANTOM TRADES (last 10)')
+    for r in reversed(recent[-10:]):
+        tsr = (r.get('timestamp') or '')[:16].replace('T', ' ')
+        mkt = ('%s | ' % (r.get('market') or '--')) if has_market else ''
+        L.append('  %s | %s%s | conf %s | 5m:%s 10m:%s 15m:%s 30m:%s 1hr:%s 2hr:%s | %s' % (
+            tsr, mkt, (r.get('direction_blocked') or '--'), (r.get('confidence') or '--'),
+            mv(r.get('pnl_5min')), mv(r.get('pnl_10min')), mv(r.get('pnl_15min')),
+            mv(r.get('pnl_30min')), mv(r.get('pnl_1hr')), mv(r.get('pnl_2hr')),
+            (r.get('verdict') or 'PENDING')))
+    L.append('')
+    L.append(bar)
+    L.append('End of %s Phantom Archie Brief' % name)
+    L.append(bar)
+    return '\n'.join(L)
+
+
+@app.route("/api/phantom-brief")
+def api_phantom_brief():
+    return build_phantom_brief(), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
 @app.route("/api/archie-brief")

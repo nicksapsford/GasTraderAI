@@ -68,7 +68,16 @@ INDICATOR_COLUMNS = [
     'guinevere_score',                         # sentiment score, '' if no news module
 ]
 
-FIELDNAMES = _BASE_FIELDS + INDICATOR_COLUMNS
+# Forward-looking short horizons (Phantom Page Enhancements, 21 Jul 2026).
+# Appended to the RIGHT so existing column positions never move; old rows show
+# these as empty and the 30min/2hr columns (already present) are unaffected.
+NEW_HORIZON_COLUMNS = [
+    'price_5min', 'pnl_5min',      # float -- price / P&L 5 mins later
+    'price_10min', 'pnl_10min',    # float -- price / P&L 10 mins later
+    'price_15min', 'pnl_15min',    # float -- price / P&L 15 mins later
+]
+
+FIELDNAMES = _BASE_FIELDS + INDICATOR_COLUMNS + NEW_HORIZON_COLUMNS
 
 # Verdict thresholds (points, $/MMBtu) -- classified on the 1hr post-decision window.
 # System 5 Review desk-wide (18 Jul 2026): lowered 0.06 -> 0.02. Like OilTrader, 0.06 was
@@ -269,13 +278,23 @@ def _update_row(row_index, market, direction_blocked,
     get_price_fn: callable that returns current float price for market.
     """
     checkpoints = [
+        (5 * 60,   'price_5min',  'pnl_5min'),
+        (10 * 60,  'price_10min', 'pnl_10min'),
+        (15 * 60,  'price_15min', 'pnl_15min'),
         (30 * 60,  'price_30min', 'pnl_30min'),
         (60 * 60,  'price_1hr',   'pnl_1hr'),
         (120 * 60, 'price_2hr',   'pnl_2hr'),
     ]
 
+    # Absolute-time scheduling: each checkpoint fires at its true elapsed time
+    # from the decision. (Previously the loop slept cumulatively, so price_1hr
+    # actually landed at ~90min and price_2hr at ~210min; now 5/10/15/30/60/120
+    # are accurate. Phantom Page Enhancements, 21 Jul 2026.)
+    _start = time.time()
     for wait_seconds, price_col, pnl_col in checkpoints:
-        time.sleep(wait_seconds)
+        _remaining = wait_seconds - (time.time() - _start)
+        if _remaining > 0:
+            time.sleep(_remaining)
 
         try:
             price = get_price_fn(market)
